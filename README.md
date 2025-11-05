@@ -1,6 +1,6 @@
-# P3 BMX Parser - MyLaps ProChip P3 Protocol
+# P3 BMX Parser - P3 Protocol
 
-A Rust workspace for working with the MyLaps ProChip P3 binary protocol used in BMX racing timing systems.
+A Rust workspace for working with the P3 binary protocol used in BMX racing timing systems.
 
 ## Project Structure
 
