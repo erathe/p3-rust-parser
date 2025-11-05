@@ -1,0 +1,15 @@
+[package]
+name = "p3-protocol"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eirik Rathe"]
+description = "Core protocol definitions for MyLaps ProChip P3 binary protocol"
+license = "CC-BY-NC-4.0"
+
+[dependencies]
+crc = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+proptest = { workspace = true }

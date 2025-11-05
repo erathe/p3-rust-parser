@@ -1,0 +1,14 @@
+{
+  "error": "CRC_MISMATCH",
+  "message": "CRC validation failed",
+  "expected_crc": 719,
+  "received_crc": 65535,
+  "details": {
+    "message_type": "PASSING",
+    "tor": 1,
+    "version": 2,
+    "length": 51,
+    "flags": 0
+  },
+  "notes": "This message should fail CRC validation and be rejected"
+}

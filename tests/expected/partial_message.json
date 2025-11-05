@@ -1,0 +1,11 @@
+{
+  "error": "INCOMPLETE_MESSAGE",
+  "message": "Message incomplete - waiting for more data",
+  "details": {
+    "declared_length": 51,
+    "received_bytes": 21,
+    "missing_bytes": 30,
+    "has_eor": false
+  },
+  "notes": "Parser should buffer this and wait for remaining data"
+}

@@ -1,0 +1,24 @@
+[package]
+name = "p3-parser"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eirik Rathe"]
+description = "Parser for MyLaps ProChip P3 binary protocol - converts binary messages to JSON"
+license = "CC-BY-NC-4.0"
+
+[dependencies]
+p3-protocol = { path = "../p3-protocol" }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+
+[[bin]]
+name = "p3-parser"
+path = "src/bin/p3-parser.rs"

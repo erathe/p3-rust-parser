@@ -1,0 +1,21 @@
+{
+  "message_type": "STATUS",
+  "tor": 2,
+  "version": 2,
+  "length": 31,
+  "crc": 10045,
+  "flags": 0,
+  "fields": {
+    "noise": 27,
+    "gps_status": 0,
+    "gps_fix": false
+  },
+  "raw_fields": {
+    "0x01": "1B00",
+    "0x07": "2100",
+    "0x0C": "7A",
+    "0x06": "00",
+    "0x81": "FC050400"
+  },
+  "notes": "STATUS message with no GPS fix"
+}

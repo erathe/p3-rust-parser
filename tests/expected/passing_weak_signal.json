@@ -1,0 +1,32 @@
+{
+  "message_type": "PASSING",
+  "tor": 1,
+  "version": 2,
+  "length": 51,
+  "crc": 2063,
+  "flags": 0,
+  "fields": {
+    "passing_number": 61,
+    "transponder_id": 8876829,
+    "rtc_time_us": 1264780304616,
+    "rtc_time_iso": "2010-01-29T14:51:44.304616Z",
+    "strength": 34,
+    "hits": 3,
+    "passing_flags": 0
+  },
+  "raw_fields": {
+    "0x01": "3D000000",
+    "0x03": "1D738700",
+    "0x04": "E87E98692450 0400",
+    "0x05": "2200",
+    "0x06": "0300",
+    "0x08": "0000",
+    "0x81": "B0140200"
+  },
+  "signal_quality": {
+    "strength_rating": "weak",
+    "hits_rating": "very_low",
+    "reliability": "marginal"
+  },
+  "notes": "Weak signal example - strength below typical 60+ threshold, only 3 hits detected"
+}

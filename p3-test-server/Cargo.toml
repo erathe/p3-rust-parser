@@ -1,0 +1,26 @@
+[package]
+name = "p3-test-server"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eirik Rathe"]
+license = "CC-BY-NC-4.0"
+
+[[bin]]
+name = "test-server"
+path = "src/main.rs"
+
+[dependencies]
+p3-protocol = { path = "../p3-protocol" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+proptest = { workspace = true }
+quickcheck = { workspace = true }
+quickcheck_macros = { workspace = true }

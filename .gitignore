@@ -1,0 +1,33 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Build artifacts
+*.rlib
+*.rmeta
+*.so
+*.dll
+*.dylib
+*.a
+
+# Debug files
+*.dSYM/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+captures
+
+tests/README.md
+
+docs/
+scripts/
+
+create_fixtures.py

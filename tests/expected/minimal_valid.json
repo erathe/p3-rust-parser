@@ -1,0 +1,10 @@
+{
+  "message_type": "STATUS",
+  "tor": 2,
+  "version": 2,
+  "length": 11,
+  "crc": 0,
+  "flags": 0,
+  "fields": {},
+  "notes": "Minimal valid message with no body fields - edge case for parser"
+}

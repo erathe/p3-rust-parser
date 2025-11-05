@@ -1,0 +1,26 @@
+{
+  "message_type": "PASSING",
+  "tor": 1,
+  "version": 2,
+  "length": 51,
+  "crc": 719,
+  "flags": 0,
+  "fields": {
+    "passing_number": 105906,
+    "transponder_id": 7405607,
+    "rtc_time_us": 1265363625502,
+    "rtc_time_iso": "2010-02-05T03:27:05.625502Z",
+    "strength": 51,
+    "hits": 16,
+    "passing_flags": 0
+  },
+  "raw_fields": {
+    "0x01": "B29B0100",
+    "0x03": "27FC7000",
+    "0x04": "E819E6BD8A750400",
+    "0x05": "3300",
+    "0x06": "1000",
+    "0x08": "0000",
+    "0x81": "FC050400"
+  }
+}

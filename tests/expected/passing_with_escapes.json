@@ -1,0 +1,28 @@
+{
+  "message_type": "PASSING",
+  "tor": 1,
+  "version": 2,
+  "length": 51,
+  "crc": 7659,
+  "flags": 0,
+  "has_escape_sequences": true,
+  "escape_count": 1,
+  "fields": {
+    "passing_number": 2461,
+    "transponder_id": 3593956,
+    "rtc_time_us": 1342783529232,
+    "rtc_time_iso": "2012-07-20T14:25:29.529232Z",
+    "strength": 114,
+    "hits": 39,
+    "passing_flags": 0
+  },
+  "raw_fields": {
+    "0x01": "9D090000",
+    "0x03": "E4D23600",
+    "0x04": "10798FE4F2CE0400",
+    "0x05": "7200",
+    "0x06": "2700",
+    "0x08": "0000"
+  },
+  "notes": "Contains escape sequence at offset 27-28: 8D AF -> 8F"
+}
