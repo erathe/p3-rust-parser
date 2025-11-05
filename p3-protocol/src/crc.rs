@@ -56,7 +56,7 @@ const fn init_crc16_table() -> [u16; 256] {
 ///
 /// # Example
 /// ```
-/// use p3_test_server::generator::crc::calculate_crc;
+/// use p3_protocol::calculate_crc;
 ///
 /// // Message with CRC field zeroed
 /// let message = vec![0x8E, 0x02, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x8F];
@@ -122,7 +122,7 @@ pub fn calculate_message_crc(escaped_message: &[u8]) -> Result<u16, CrcError> {
 ///
 /// # Example
 /// ```
-/// use p3_test_server::generator::crc::validate_crc;
+/// use p3_protocol::validate_crc;
 ///
 /// // Complete status message with valid CRC
 /// let message = vec![

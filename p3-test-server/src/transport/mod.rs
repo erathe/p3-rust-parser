@@ -29,7 +29,6 @@ impl TransportHandle {
 /// Internal message types for the broadcast channel
 enum BroadcastMessage {
     Data(Bytes),
-    RegisterClient(ClientId, mpsc::Sender<Bytes>),
     UnregisterClient(ClientId),
 }
 
@@ -159,10 +158,6 @@ impl TcpTransport {
                             }
 
                             debug!("Broadcasted {} bytes to {} clients", message.len(), self.clients.len());
-                        }
-                        BroadcastMessage::RegisterClient(client_id, client_tx) => {
-                            self.clients.insert(client_id, client_tx);
-                            info!("Client {} registered, total clients: {}", client_id, self.clients.len());
                         }
                         BroadcastMessage::UnregisterClient(client_id) => {
                             self.clients.remove(&client_id);

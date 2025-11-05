@@ -48,7 +48,7 @@ fn escape_byte(byte: u8) -> [u8; 2] {
 ///
 /// # Example
 /// ```
-/// use p3_test_server::generator::escape::encode;
+/// use p3_protocol::encode;
 ///
 /// // Original data containing control byte 0x8F
 /// let data = vec![0x01, 0x8F, 0x02];
@@ -80,7 +80,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 ///
 /// # Example
 /// ```
-/// use p3_test_server::generator::escape::unescaped_length;
+/// use p3_protocol::unescaped_length;
 ///
 /// let data = vec![0x01, 0x8F, 0x02];  // 3 bytes
 /// assert_eq!(unescaped_length(&data), 3);
