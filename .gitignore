@@ -25,6 +25,15 @@ Cargo.lock
 
 captures
 
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Node / Frontend
+node_modules/
+.svelte-kit/
+
 tests/README.md
 
 docs/

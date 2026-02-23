@@ -1,0 +1,28 @@
+[package]
+name = "p3-server"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eirik Rathe"]
+description = "BMX race timing server - connects to MyLaps P3 decoders and serves real-time data via WebSocket"
+license = "CC-BY-NC-4.0"
+
+[dependencies]
+p3-protocol = { path = "../p3-protocol" }
+p3-parser = { path = "../p3-parser" }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[[bin]]
+name = "p3-server"
+path = "src/main.rs"

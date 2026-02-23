@@ -350,7 +350,7 @@ fn build_message(msg_type: MessageType, tlv_body: Vec<u8>) -> Vec<u8> {
     final_message
 }
 
-/// Helper function to build a rider PASSING message.
+/// Helper function to build a rider PASSING message with a specific decoder ID.
 ///
 /// Riders have a STRING field (8-byte ASCII identifier).
 ///
@@ -363,6 +363,7 @@ pub fn build_rider_passing(
     rtc_time: u64,
     strength: u16,
     hits: u16,
+    decoder_id: u32,
 ) -> Result<Vec<u8>, BuilderError> {
     build_passing(
         passing_number,
@@ -372,22 +373,27 @@ pub fn build_rider_passing(
         hits,
         0x0000, // flags
         Some(string),
-        0x000C00D0, // decoder_id (D0000C00)
+        decoder_id,
     )
 }
 
-/// Helper function to build a gate PASSING message.
+/// Helper function to build a gate PASSING message with a specific decoder ID.
 ///
 /// Gates don't have a STRING field and use reserved transponder IDs (9991, 9992, 9995).
 /// Gates also don't have STRENGTH or HITS fields in live captures.
-pub fn build_gate_passing(passing_number: u32, transponder: u32, rtc_time: u64) -> Vec<u8> {
+pub fn build_gate_passing(
+    passing_number: u32,
+    transponder: u32,
+    rtc_time: u64,
+    decoder_id: u32,
+) -> Vec<u8> {
     // Build TLV body for gate - no STRING, STRENGTH, or HITS fields
     let tlv_body = TlvBuilder::new()
         .add_u32(0x01, passing_number) // PASSING_NUMBER
         .add_u32(0x03, transponder) // TRANSPONDER
         .add_u64(0x04, rtc_time) // RTC_TIME
         .add_u16(0x08, 0x0000) // FLAGS
-        .add_u32(0x81, 0x000C00D0) // DECODER_ID (D0000C00)
+        .add_u32(0x81, decoder_id) // DECODER_ID
         .build();
 
     build_message(MessageType::Passing, tlv_body)
@@ -404,30 +410,17 @@ pub fn build_gate_passing(passing_number: u32, transponder: u32, rtc_time: u64) 
 /// * `string` - 8-byte ASCII identifier (e.g., "FL-94890")
 /// * `strength` - Signal strength (60-150 typical range)
 /// * `hits` - Number of signal hits detected (2-50 typical range)
+/// * `decoder_id` - Decoder serial number
 ///
 /// # Errors
 /// Returns `BuilderError::TimeError` if the system time is before Unix epoch.
-///
-/// # Example
-/// ```
-/// use p3_test_server::generator::builder::build_rider_passing_now;
-///
-/// // Generate a passing message with current timestamp
-/// let message = build_rider_passing_now(
-///     8841,           // passing number
-///     102758186,      // transponder ID
-///     b"FL-94890",    // rider string
-///     127,            // signal strength
-///     33              // hits
-/// )?;
-/// # Ok::<(), p3_test_server::generator::builder::BuilderError>(())
-/// ```
 pub fn build_rider_passing_now(
     passing_number: u32,
     transponder: u32,
     string: &[u8; 8],
     strength: u16,
     hits: u16,
+    decoder_id: u32,
 ) -> Result<Vec<u8>, BuilderError> {
     build_rider_passing(
         passing_number,
@@ -436,6 +429,7 @@ pub fn build_rider_passing_now(
         current_timestamp_micros()?,
         strength,
         hits,
+        decoder_id,
     )
 }
 
@@ -447,29 +441,20 @@ pub fn build_rider_passing_now(
 /// # Arguments
 /// * `passing_number` - Sequential detection counter
 /// * `transponder` - Gate beacon transponder ID (typically 9991, 9992, or 9995)
+/// * `decoder_id` - Decoder serial number
 ///
 /// # Errors
 /// Returns `BuilderError::TimeError` if the system time is before Unix epoch.
-///
-/// # Example
-/// ```
-/// use p3_test_server::generator::builder::build_gate_passing_now;
-///
-/// // Generate a gate drop beacon with current timestamp
-/// let message = build_gate_passing_now(
-///     8855,      // passing number
-///     9992       // gate beacon ID
-/// )?;
-/// # Ok::<(), p3_test_server::generator::builder::BuilderError>(())
-/// ```
 pub fn build_gate_passing_now(
     passing_number: u32,
     transponder: u32,
+    decoder_id: u32,
 ) -> Result<Vec<u8>, BuilderError> {
     Ok(build_gate_passing(
         passing_number,
         transponder,
         current_timestamp_micros()?,
+        decoder_id,
     ))
 }
 
@@ -495,14 +480,18 @@ pub fn build_gate_passing_now(
 /// use p3_test_server::generator::builder::build_gate_passing_with_escape;
 ///
 /// // Generate gate drop with guaranteed escape sequence
-/// let message = build_gate_passing_with_escape(8975, 9992);
+/// let message = build_gate_passing_with_escape(8975, 9992, 0x000C00D0);
 /// # Ok::<(), p3_test_server::generator::builder::BuilderError>(())
 /// ```
-pub fn build_gate_passing_with_escape(passing_number: u32, transponder: u32) -> Vec<u8> {
+pub fn build_gate_passing_with_escape(
+    passing_number: u32,
+    transponder: u32,
+    decoder_id: u32,
+) -> Vec<u8> {
     // This specific timestamp produces an escape sequence when encoded
     // It's based on real data: 1762286699916839 microseconds since epoch
     let rtc_time_with_escape: u64 = 1762286699916839;
-    build_gate_passing(passing_number, transponder, rtc_time_with_escape)
+    build_gate_passing(passing_number, transponder, rtc_time_with_escape, decoder_id)
 }
 
 #[cfg(test)]
@@ -528,7 +517,7 @@ mod tests {
     fn test_build_passing_rider() {
         let string = b"FL-94890";
         let message =
-            build_rider_passing(8841, 102758186, string, 0x0006426530063546, 127, 33).unwrap();
+            build_rider_passing(8841, 102758186, string, 0x0006426530063546, 127, 33, 0x000C00D0).unwrap();
 
         // Should start with SOR and end with EOR
         assert_eq!(message[0], SOR);
@@ -540,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_build_passing_gate() {
-        let message = build_gate_passing(8855, 9992, 0x0006426606711F54);
+        let message = build_gate_passing(8855, 9992, 0x0006426606711F54, 0x000C00D0);
 
         // Should start with SOR and end with EOR
         assert_eq!(message[0], SOR);
@@ -604,7 +593,7 @@ mod tests {
     #[test]
     fn test_build_rider_passing_now() {
         let string = b"FL-94890";
-        let message = build_rider_passing_now(8841, 102758186, string, 127, 33).unwrap();
+        let message = build_rider_passing_now(8841, 102758186, string, 127, 33, 0x000C00D0).unwrap();
 
         // Should start with SOR and end with EOR
         assert_eq!(message[0], SOR);
@@ -619,7 +608,7 @@ mod tests {
 
     #[test]
     fn test_build_gate_passing_now() {
-        let message = build_gate_passing_now(8855, 9992).unwrap();
+        let message = build_gate_passing_now(8855, 9992, 0x000C00D0).unwrap();
 
         // Should start with SOR and end with EOR
         assert_eq!(message[0], SOR);
