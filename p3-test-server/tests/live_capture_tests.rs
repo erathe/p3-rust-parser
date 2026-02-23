@@ -121,6 +121,7 @@ fn test_generate_rider_high_hits() {
         0x00064265EC300635, // rtc_time
         127,                // strength
         33,                 // hits
+        0x000C00D0,         // decoder_id
     ).expect("Failed to build message");
 
     // Load expected fixture
@@ -165,6 +166,7 @@ fn test_generate_rider_peak_strength() {
         0x0006426608CA0185, // rtc_time
         133,                // strength
         29,                 // hits
+        0x000C00D0,         // decoder_id
     ).expect("Failed to build message");
 
     // Load expected fixture
@@ -209,6 +211,7 @@ fn test_generate_rider_weak_signal() {
         0x000642660AF69629, // rtc_time
         76,                 // strength
         2,                  // hits
+        0x000C00D0,         // decoder_id
     ).expect("Failed to build message");
 
     // Load expected fixture
@@ -248,6 +251,7 @@ fn test_generate_gate_primary() {
         8855,               // passing_number
         9992,               // transponder (gate beacon)
         0x0006426606711F54, // rtc_time
+        0x000C00D0,         // decoder_id
     );
 
     // Load expected fixture
@@ -287,6 +291,7 @@ fn test_generate_gate_alternative() {
         8859,               // passing_number
         9995,               // transponder (gate beacon)
         0x000642660ACF34E8, // rtc_time
+        0x000C00D0,         // decoder_id
     );
 
     // Load expected fixture
