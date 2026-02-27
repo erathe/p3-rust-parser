@@ -18,16 +18,13 @@ pub async fn create_pool(db_path: &str) -> anyhow::Result<SqlitePool> {
 
 pub async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     // Enable WAL mode and foreign keys
-    sqlx::query("PRAGMA journal_mode=WAL")
-        .execute(pool)
-        .await?;
-    sqlx::query("PRAGMA foreign_keys=ON")
-        .execute(pool)
-        .await?;
+    sqlx::query("PRAGMA journal_mode=WAL").execute(pool).await?;
+    sqlx::query("PRAGMA foreign_keys=ON").execute(pool).await?;
 
     let migrations = [
         include_str!("../../migrations/001_initial_schema.sql"),
         include_str!("../../migrations/002_track_sections.sql"),
+        include_str!("../../migrations/003_dev_ingest.sql"),
     ];
 
     for migration_sql in &migrations {

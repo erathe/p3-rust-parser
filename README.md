@@ -4,7 +4,7 @@ A Rust workspace for working with the P3 binary protocol used in BMX racing timi
 
 ## Project Structure
 
-This is a Cargo workspace containing three crates:
+This is a Cargo workspace containing multiple crates:
 
 ### p3-protocol (Shared Library)
 
@@ -28,6 +28,14 @@ Simulates a MyLaps ProChip Smart Decoder for testing parsers without physical ha
 ### 🔍 p3-parser (Message Parser)
 
 Parses binary P3 messages to structured data and JSON.
+
+### 🌐 p3-server (Central Server)
+
+Axum-based central timing server that receives decoder data and serves realtime APIs/WebSocket feeds.
+
+### 📡 p3-track-client (Track-side Forwarder)
+
+Track-local service that connects to physical/local decoder TCP, decodes P3 messages, and forwards normalized JSON to the central server ingest API.
 
 **Will provide:**
 - Frame parsing with CRC validation

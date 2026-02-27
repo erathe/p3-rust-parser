@@ -28,6 +28,16 @@ server:
 server-no-decoder:
     cargo run -p p3-server -- --no-decoder
 
+# Start a track-side client that decodes local P3 and forwards JSON to central server
+track-client client_id track_id session_id="dev-default" decoder_host="localhost" decoder_port="5403" central_url="http://localhost:3001":
+    cargo run -p p3-track-client -- \
+      --client-id {{client_id}} \
+      --track-id {{track_id}} \
+      --session-id {{session_id}} \
+      --decoder-host {{decoder_host}} \
+      --decoder-port {{decoder_port}} \
+      --central-base-url {{central_url}}
+
 # Start the SvelteKit frontend dev server
 frontend:
     cd frontend && npm run dev

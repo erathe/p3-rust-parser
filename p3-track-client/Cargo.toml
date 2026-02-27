@@ -1,0 +1,23 @@
+[package]
+name = "p3-track-client"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eirik Rathe"]
+description = "Track-side client that decodes local P3 messages and forwards normalized JSON to a central server"
+license = "CC-BY-NC-4.0"
+
+[dependencies]
+p3-parser = { path = "../p3-parser" }
+p3-protocol = { path = "../p3-protocol" }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true }
+
+[[bin]]
+name = "p3-track-client"
+path = "src/main.rs"
