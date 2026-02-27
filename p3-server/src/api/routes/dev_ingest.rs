@@ -11,7 +11,7 @@ use crate::api::error::ApiError;
 use crate::api::state::AppState;
 use crate::db::queries::dev_ingest::{self, IngestMessageRow, InsertSummary, PreparedIngestEvent};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct IngestBatchRequest {
     pub contract_version: String,
     pub session_id: String,
@@ -20,7 +20,7 @@ pub struct IngestBatchRequest {
     pub events: Vec<IngestEvent>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct IngestEvent {
     pub seq: u64,
     pub captured_at_us: u64,
@@ -341,7 +341,7 @@ mod tests {
             }],
         };
 
-        ingest_batch(State(state.clone()), Json(request))
+        let _ = ingest_batch(State(state.clone()), Json(request))
             .await
             .unwrap();
 
