@@ -43,7 +43,7 @@ pub async fn insert_batch(
             "INSERT INTO ingest_messages \
              (id, session_id, track_id, client_id, seq, captured_at_us, message_type, payload_json) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
-             ON CONFLICT(client_id, seq) DO NOTHING",
+             ON CONFLICT(session_id, client_id, seq) DO NOTHING",
         )
         .bind(&id)
         .bind(session_id)

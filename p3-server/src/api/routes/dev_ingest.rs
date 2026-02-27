@@ -321,6 +321,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ingest_batch_allows_same_seq_for_different_sessions() {
+        let state = test_state().await;
+
+        let first = IngestBatchRequest {
+            contract_version: "track_ingest.v1".to_string(),
+            session_id: "session-1".to_string(),
+            track_id: "track-1".to_string(),
+            client_id: "client-1".to_string(),
+            events: vec![IngestEvent {
+                seq: 1,
+                captured_at_us: 100,
+                message: Message::Status(StatusMessage {
+                    noise: 45,
+                    gps_status: 1,
+                    temperature: 210,
+                    satellites: 8,
+                    decoder_id: Some("D1000C00".to_string()),
+                }),
+            }],
+        };
+
+        let second = IngestBatchRequest {
+            contract_version: "track_ingest.v1".to_string(),
+            session_id: "session-2".to_string(),
+            track_id: "track-1".to_string(),
+            client_id: "client-1".to_string(),
+            events: vec![IngestEvent {
+                seq: 1,
+                captured_at_us: 101,
+                message: Message::Status(StatusMessage {
+                    noise: 46,
+                    gps_status: 1,
+                    temperature: 211,
+                    satellites: 7,
+                    decoder_id: Some("D1000C00".to_string()),
+                }),
+            }],
+        };
+
+        let first_result = ingest_batch(State(state.clone()), Json(first))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(first_result.accepted, 1);
+        assert_eq!(first_result.duplicates, 0);
+
+        let second_result = ingest_batch(State(state.clone()), Json(second))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(second_result.accepted, 1);
+        assert_eq!(second_result.duplicates, 0);
+
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM ingest_messages WHERE client_id = 'client-1' AND seq = 1",
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
     async fn replay_rebroadcasts_stored_messages() {
         let state = test_state().await;
         let request = IngestBatchRequest {

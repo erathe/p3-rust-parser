@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS ingest_messages (
     message_type    TEXT NOT NULL,
     payload_json    TEXT NOT NULL,
     received_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(client_id, seq)
+    UNIQUE(session_id, client_id, seq)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ingest_messages_session_track

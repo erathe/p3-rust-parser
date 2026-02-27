@@ -1,6 +1,5 @@
 use clap::Parser as ClapParser;
-use p3_parser::{Message, Parser};
-use p3_protocol::{ESCAPE, SOR};
+use p3_parser::{Message, stream::MessageFramer};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
@@ -266,74 +265,4 @@ fn now_unix_micros() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     dur.as_micros().min(u64::MAX as u128) as u64
-}
-
-/// Accumulates bytes from a decoder stream and yields complete parsed messages.
-struct MessageFramer {
-    buffer: Vec<u8>,
-    parser: Parser,
-}
-
-impl MessageFramer {
-    fn new() -> Self {
-        Self {
-            buffer: Vec::with_capacity(4096),
-            parser: Parser::new(),
-        }
-    }
-
-    fn feed(&mut self, data: &[u8]) -> Vec<FrameResult> {
-        self.buffer.extend_from_slice(data);
-        let mut results = Vec::new();
-
-        while let Some(message_end) = find_complete_message(&self.buffer) {
-            let message_data = &self.buffer[..message_end];
-            results.push(self.parser.parse(message_data));
-            self.buffer.drain(..message_end);
-        }
-
-        results
-    }
-}
-
-type FrameResult = Result<Message, p3_parser::ParseError>;
-
-fn calculate_escaped_message_end(
-    buffer: &[u8],
-    start_pos: usize,
-    unescaped_length: usize,
-) -> Option<usize> {
-    let mut buffer_pos = start_pos;
-    let mut unescaped_count = 0;
-
-    while unescaped_count < unescaped_length {
-        if buffer_pos >= buffer.len() {
-            return None;
-        }
-
-        if buffer[buffer_pos] == ESCAPE {
-            if buffer_pos + 1 >= buffer.len() {
-                return None;
-            }
-            buffer_pos += 2;
-            unescaped_count += 1;
-        } else {
-            buffer_pos += 1;
-            unescaped_count += 1;
-        }
-    }
-
-    Some(buffer_pos)
-}
-
-fn find_complete_message(buffer: &[u8]) -> Option<usize> {
-    let sor_pos = buffer.iter().position(|&b| b == SOR)?;
-
-    if buffer.len() < sor_pos + 4 {
-        return None;
-    }
-
-    let len_bytes = [buffer[sor_pos + 2], buffer[sor_pos + 3]];
-    let unescaped_length = u16::from_le_bytes(len_bytes) as usize;
-    calculate_escaped_message_end(buffer, sor_pos, unescaped_length)
 }
