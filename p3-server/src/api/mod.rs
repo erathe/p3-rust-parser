@@ -4,8 +4,8 @@ pub mod state;
 pub mod ws;
 
 use axum::{
-    routing::{get, post, put},
     Router,
+    routing::{get, post, put},
 };
 use state::AppState;
 use tower_http::cors::CorsLayer;
@@ -16,7 +16,10 @@ pub fn router(state: AppState) -> Router {
         // WebSocket
         .route("/ws", get(ws::ws_handler))
         // Tracks
-        .route("/api/tracks", get(routes::tracks::list).post(routes::tracks::create))
+        .route(
+            "/api/tracks",
+            get(routes::tracks::list).post(routes::tracks::create),
+        )
         .route(
             "/api/tracks/{id}",
             get(routes::tracks::get)
@@ -101,6 +104,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/race/force-finish", post(routes::race::force_finish))
         // Seed demo data
         .route("/api/seed-demo", post(routes::seed::seed_demo))
+        // Dev ingest + replay
+        .route(
+            "/api/dev/ingest/batch",
+            post(routes::dev_ingest::ingest_batch),
+        )
+        .route(
+            "/api/dev/ingest/messages",
+            get(routes::dev_ingest::list_messages),
+        )
+        .route("/api/dev/ingest/replay", post(routes::dev_ingest::replay))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
