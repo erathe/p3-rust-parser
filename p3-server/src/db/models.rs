@@ -6,6 +6,10 @@ pub struct TrackRow {
     pub name: String,
     pub hill_type: String,
     pub gate_beacon_id: i64,
+    pub location_label: Option<String>,
+    pub timezone: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
 }

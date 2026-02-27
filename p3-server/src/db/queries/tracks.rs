@@ -21,15 +21,24 @@ pub async fn create_track(
     name: &str,
     hill_type: &str,
     gate_beacon_id: i64,
+    location_label: Option<&str>,
+    timezone: Option<&str>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
 ) -> sqlx::Result<TrackRow> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO tracks (id, name, hill_type, gate_beacon_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO tracks (id, name, hill_type, gate_beacon_id, location_label, timezone, latitude, longitude) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(name)
     .bind(hill_type)
     .bind(gate_beacon_id)
+    .bind(location_label)
+    .bind(timezone)
+    .bind(latitude)
+    .bind(longitude)
     .execute(pool)
     .await?;
 
@@ -43,13 +52,23 @@ pub async fn update_track(
     name: &str,
     hill_type: &str,
     gate_beacon_id: i64,
+    location_label: Option<&str>,
+    timezone: Option<&str>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
 ) -> sqlx::Result<Option<TrackRow>> {
     let result = sqlx::query(
-        "UPDATE tracks SET name = ?, hill_type = ?, gate_beacon_id = ?, updated_at = datetime('now') WHERE id = ?",
+        "UPDATE tracks \
+         SET name = ?, hill_type = ?, gate_beacon_id = ?, location_label = ?, timezone = ?, latitude = ?, longitude = ?, updated_at = datetime('now') \
+         WHERE id = ?",
     )
     .bind(name)
     .bind(hill_type)
     .bind(gate_beacon_id)
+    .bind(location_label)
+    .bind(timezone)
+    .bind(latitude)
+    .bind(longitude)
     .bind(id)
     .execute(pool)
     .await?;
@@ -106,10 +125,12 @@ pub async fn create_timing_loop(
     .execute(pool)
     .await?;
 
-    Ok(sqlx::query_as::<_, TimingLoopRow>("SELECT * FROM timing_loops WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool)
-        .await?)
+    Ok(
+        sqlx::query_as::<_, TimingLoopRow>("SELECT * FROM timing_loops WHERE id = ?")
+            .bind(&id)
+            .fetch_one(pool)
+            .await?,
+    )
 }
 
 pub async fn update_timing_loop(

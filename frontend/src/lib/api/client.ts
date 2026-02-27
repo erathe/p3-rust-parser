@@ -13,7 +13,8 @@ import type {
 	EventClass,
 	Moto,
 	MotoWithEntries,
-	RaceStateResponse
+	RaceStateResponse,
+	TrackOnboardingDiscoveryResponse
 } from './types';
 
 const BASE = '/api';
@@ -138,4 +139,21 @@ export const race = {
 		}),
 	reset: () => request<RaceStateResponse>('/race/reset', { method: 'POST' }),
 	forceFinish: () => request<RaceStateResponse>('/race/force-finish', { method: 'POST' })
+};
+
+// Track onboarding
+export const onboarding = {
+	discovery: (trackId: string, params?: { window_seconds?: number; max_messages?: number }) => {
+		const search = new URLSearchParams();
+		if (params?.window_seconds !== undefined) {
+			search.set('window_seconds', String(params.window_seconds));
+		}
+		if (params?.max_messages !== undefined) {
+			search.set('max_messages', String(params.max_messages));
+		}
+		const suffix = search.toString() ? `?${search.toString()}` : '';
+		return request<TrackOnboardingDiscoveryResponse>(
+			`/tracks/${trackId}/onboarding/discovery${suffix}`
+		);
+	}
 };

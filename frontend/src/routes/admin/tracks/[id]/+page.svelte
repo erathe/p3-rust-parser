@@ -86,11 +86,24 @@
 	{:else if !track}
 		<div class="text-red-400">Track not found</div>
 	{:else}
-		<div>
-			<h1 class="text-2xl font-bold">{track.name}</h1>
-			<p class="text-sm text-zinc-500 mt-0.5">
-				{track.hill_type} hill &middot; Gate beacon: {track.gate_beacon_id}
-			</p>
+		<div class="flex items-start justify-between gap-4">
+			<div>
+				<h1 class="text-2xl font-bold">{track.name}</h1>
+				<p class="text-sm text-zinc-500 mt-0.5">
+					{track.hill_type} hill &middot; Gate beacon: {track.gate_beacon_id}
+				</p>
+				{#if track.location_label || (track.latitude !== null && track.longitude !== null)}
+					<p class="text-xs text-zinc-600 mt-1">
+						{track.location_label ?? `${track.latitude?.toFixed(5)}, ${track.longitude?.toFixed(5)}`}
+					</p>
+				{/if}
+			</div>
+			<a
+				href="/admin/tracks/{track.id}/onboarding"
+				class="px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors text-sm font-medium"
+			>
+				Onboarding
+			</a>
 		</div>
 
 		{#if error}

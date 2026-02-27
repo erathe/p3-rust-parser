@@ -38,6 +38,31 @@ track-client client_id track_id session_id="dev-default" decoder_host="localhost
       --decoder-port {{decoder_port}} \
       --central-base-url {{central_url}}
 
+# Run live onboarding feed (test-server -> track-client -> central server)
+# Use with `just server-no-decoder` in another terminal for track-scoped ingest-only testing.
+onboarding-feed client_id track_id session_id="onboarding-dev" riders="6" central_url="http://localhost:3001":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Starting p3-test-server (full-race, {{riders}} riders) on :5403..."
+    cargo run -p p3-test-server -- --scenario full-race --riders {{riders}} &
+    TEST_PID=$!
+    sleep 2
+    echo "Starting p3-track-client (track_id={{track_id}}, client_id={{client_id}})..."
+    cargo run -p p3-track-client -- \
+      --client-id {{client_id}} \
+      --track-id {{track_id}} \
+      --session-id {{session_id}} \
+      --decoder-host localhost \
+      --decoder-port 5403 \
+      --central-base-url {{central_url}} &
+    CLIENT_PID=$!
+    echo ""
+    echo "Live onboarding feed is running."
+    echo "Open /admin/tracks/{{track_id}}/onboarding in the frontend."
+    echo "Press Ctrl+C to stop both processes."
+    trap "kill $TEST_PID $CLIENT_PID 2>/dev/null" EXIT INT TERM
+    wait
+
 # Start the SvelteKit frontend dev server
 frontend:
     cd frontend && npm run dev

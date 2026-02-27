@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use serde::Deserialize;
 
@@ -24,6 +24,10 @@ pub struct CreateTrackRequest {
     pub name: String,
     pub hill_type: Option<String>,
     pub gate_beacon_id: Option<i64>,
+    pub location_label: Option<String>,
+    pub timezone: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -73,7 +77,19 @@ pub async fn create(
         ));
     }
 
-    let track = tracks::create_track(&state.db, &body.name, hill_type, gate_beacon_id).await?;
+    validate_geo_fields(body.latitude, body.longitude)?;
+
+    let track = tracks::create_track(
+        &state.db,
+        &body.name,
+        hill_type,
+        gate_beacon_id,
+        body.location_label.as_deref(),
+        body.timezone.as_deref(),
+        body.latitude,
+        body.longitude,
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(track)))
 }
 
@@ -85,10 +101,22 @@ pub async fn update(
     let hill_type = body.hill_type.as_deref().unwrap_or("8m");
     let gate_beacon_id = body.gate_beacon_id.unwrap_or(9992);
 
-    tracks::update_track(&state.db, &id, &body.name, hill_type, gate_beacon_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound(format!("Track {} not found", id)))
-        .map(Json)
+    validate_geo_fields(body.latitude, body.longitude)?;
+
+    tracks::update_track(
+        &state.db,
+        &id,
+        &body.name,
+        hill_type,
+        gate_beacon_id,
+        body.location_label.as_deref(),
+        body.timezone.as_deref(),
+        body.latitude,
+        body.longitude,
+    )
+    .await?
+    .ok_or_else(|| ApiError::NotFound(format!("Track {} not found", id)))
+    .map(Json)
 }
 
 pub async fn delete(
@@ -197,4 +225,30 @@ pub async fn save_sections(
 
     let saved = tracks::replace_all_sections(&state.db, &track_id, new_sections).await?;
     Ok(Json(saved))
+}
+
+fn validate_geo_fields(latitude: Option<f64>, longitude: Option<f64>) -> Result<(), ApiError> {
+    if latitude.is_some() != longitude.is_some() {
+        return Err(ApiError::BadRequest(
+            "latitude and longitude must both be provided together".to_string(),
+        ));
+    }
+
+    if let Some(lat) = latitude {
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(ApiError::BadRequest(
+                "latitude must be between -90 and 90".to_string(),
+            ));
+        }
+    }
+
+    if let Some(lon) = longitude {
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(ApiError::BadRequest(
+                "longitude must be between -180 and 180".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
 }
