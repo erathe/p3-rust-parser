@@ -3,6 +3,10 @@ export interface Track {
 	name: string;
 	hill_type: '5m' | '8m';
 	gate_beacon_id: number;
+	location_label: string | null;
+	timezone: string | null;
+	latitude: number | null;
+	longitude: number | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -60,6 +64,10 @@ export interface CreateTrackRequest {
 	name: string;
 	hill_type?: string;
 	gate_beacon_id?: number;
+	location_label?: string | null;
+	timezone?: string | null;
+	latitude?: number | null;
+	longitude?: number | null;
 }
 
 export interface CreateLoopRequest {
@@ -219,6 +227,32 @@ export interface FinishResult {
 export interface RaceStateResponse {
 	phase: string;
 	snapshot: RaceEventMessage;
+}
+
+export interface DiscoveredDecoder {
+	decoder_id: string;
+	passing_count: number;
+	status_count: number;
+	version_count: number;
+	gate_hits: number;
+	last_seen: string;
+	mapped_loop_id: string | null;
+	mapped_loop_name: string | null;
+	mapped_role: 'start' | 'split' | 'finish' | null;
+}
+
+export interface ObservedGateBeacon {
+	transponder_id: number;
+	hits: number;
+}
+
+export interface TrackOnboardingDiscoveryResponse {
+	track_id: string;
+	window_seconds: number;
+	sampled_messages: number;
+	decoders: DiscoveredDecoder[];
+	gate_beacons: ObservedGateBeacon[];
+	generated_at: string;
 }
 
 // Race event WebSocket messages

@@ -2,6 +2,7 @@ pub mod models;
 pub mod queries;
 
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use std::collections::HashSet;
 use tracing::info;
 
 pub async fn create_pool(db_path: &str) -> anyhow::Result<SqlitePool> {
@@ -36,9 +37,41 @@ pub async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         }
     }
 
+    migrate_track_location_columns(pool).await?;
     migrate_legacy_ingest_unique_key(pool).await?;
 
     info!("Database migrations applied");
+    Ok(())
+}
+
+async fn migrate_track_location_columns(pool: &SqlitePool) -> anyhow::Result<()> {
+    #[derive(sqlx::FromRow)]
+    struct TableInfoRow {
+        name: String,
+    }
+
+    let rows = sqlx::query_as::<_, TableInfoRow>("PRAGMA table_info(tracks)")
+        .fetch_all(pool)
+        .await?;
+
+    let existing: HashSet<String> = rows.into_iter().map(|r| r.name).collect();
+    let required_columns = [
+        ("location_label", "TEXT"),
+        ("timezone", "TEXT"),
+        ("latitude", "REAL"),
+        ("longitude", "REAL"),
+    ];
+
+    for (column_name, column_type) in required_columns {
+        if !existing.contains(column_name) {
+            sqlx::query(&format!(
+                "ALTER TABLE tracks ADD COLUMN {column_name} {column_type}"
+            ))
+            .execute(pool)
+            .await?;
+        }
+    }
+
     Ok(())
 }
 

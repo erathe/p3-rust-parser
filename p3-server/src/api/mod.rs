@@ -38,6 +38,10 @@ pub fn router(state: AppState) -> Router {
             "/api/tracks/{track_id}/loops/{loop_id}",
             put(routes::tracks::update_loop).delete(routes::tracks::delete_loop),
         )
+        .route(
+            "/api/tracks/{track_id}/onboarding/discovery",
+            get(routes::onboarding::discovery),
+        )
         // Riders
         .route(
             "/api/riders",

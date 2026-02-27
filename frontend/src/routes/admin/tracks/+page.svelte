@@ -54,6 +54,9 @@
 						<div class="text-sm text-zinc-500 mt-0.5">
 							{track.hill_type} hill &middot; Gate beacon: {track.gate_beacon_id}
 						</div>
+						{#if track.location_label}
+							<div class="text-xs text-zinc-600 mt-0.5">{track.location_label}</div>
+						{/if}
 					</div>
 					<button
 						class="px-3 py-1 text-xs text-red-400 hover:bg-red-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100"
