@@ -53,27 +53,13 @@
 	onMount(async () => {
 		await loadTrack();
 		await refreshDiscovery();
-		setListening(true);
+		if (listening) {
+			startPolling();
+		}
 	});
 
 	onDestroy(() => {
 		stopPolling();
-	});
-
-	$effect(() => {
-		if (listening) {
-			setListening(true);
-		} else {
-			stopPolling();
-		}
-	});
-
-	$effect(() => {
-		const _window = windowSeconds;
-		void _window;
-		if (listening) {
-			void refreshDiscovery();
-		}
 	});
 
 	async function loadTrack() {
@@ -100,13 +86,31 @@
 		}
 	}
 
-	function setListening(enabled: boolean) {
-		listening = enabled;
+	function startPolling() {
 		stopPolling();
-		if (!enabled) return;
 		pollingTimer = setInterval(() => {
 			void refreshDiscovery(true);
 		}, POLL_INTERVAL_MS);
+	}
+
+	function setListening(enabled: boolean) {
+		listening = enabled;
+		if (enabled) {
+			startPolling();
+			void refreshDiscovery();
+		} else {
+			stopPolling();
+		}
+	}
+
+	function updateWindow(value: string) {
+		const parsed = Number(value);
+		if (!Number.isFinite(parsed)) return;
+		windowSeconds = parsed;
+		void refreshDiscovery();
+		if (listening) {
+			startPolling();
+		}
 	}
 
 	async function refreshDiscovery(background = false) {
@@ -449,7 +453,8 @@
 					<label for="window" class="text-xs text-zinc-500">Window</label>
 					<select
 						id="window"
-						bind:value={windowSeconds}
+						value={windowSeconds}
+						onchange={(e) => updateWindow((e.currentTarget as HTMLSelectElement).value)}
 						class="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs"
 					>
 						<option value={60}>60s</option>
