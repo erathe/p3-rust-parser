@@ -203,8 +203,10 @@ pub async fn discovery(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::metrics::AppMetrics;
     use crate::api::routes::dev_ingest::{IngestBatchRequest, IngestEvent, ingest_batch};
     use p3_parser::{PassingMessage, StatusMessage};
+    use std::sync::Arc;
     use tokio::sync::broadcast;
 
     async fn test_state() -> AppState {
@@ -232,7 +234,15 @@ mod tests {
         .unwrap();
 
         let (message_tx, _) = broadcast::channel(32);
-        AppState::new(message_tx, db, None, "nats://127.0.0.1:4222".to_string())
+        AppState::new(
+            message_tx,
+            db,
+            None,
+            "nats://127.0.0.1:4222".to_string(),
+            true,
+            crate::api::auth::TrackAuthConfig::disabled(),
+            Arc::new(AppMetrics::new()),
+        )
     }
 
     #[tokio::test]

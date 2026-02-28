@@ -25,6 +25,10 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 async-nats = { workspace = true }
 futures-util = "0.3.31"
+time = "0.3"
+
+[dev-dependencies]
+tower = "0.5"
 
 [[bin]]
 name = "p3-server"

@@ -1,19 +1,23 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use async_nats::HeaderMap;
 use async_nats::error::Error as NatsError;
 use async_nats::jetstream;
+use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::AckPolicy;
 use async_nats::jetstream::consumer::pull::MessagesErrorKind;
 use futures_util::StreamExt;
 use p3_contracts::{
-    FinishResultV1, LoopConfigV1, RACE_EVENTS_ENVELOPE_CONTRACT_VERSION_V1,
+    DLQ_ENVELOPE_CONTRACT_VERSION_V1, DlqEnvelopeV1, FinishResultV1, LoopConfigV1,
+    RACE_EVENTS_ENVELOPE_CONTRACT_VERSION_V1, RACE_SNAPSHOT_ENVELOPE_CONTRACT_VERSION_V1,
     RaceControlIntentEnvelopeV1, RaceControlIntentV1, RaceEventEnvelopeV1, RaceEventPayloadV1,
-    RawIngestEnvelopeV1, RiderPositionV1, StagedRiderV1, TrackConfigV1, build_idempotency_key,
-    build_race_events_subject,
+    RaceSnapshotEnvelopeV1, RawIngestEnvelopeV1, RiderPositionV1, StagedRiderV1, TrackConfigV1,
+    build_idempotency_key, build_race_events_subject, build_race_snapshot_subject,
 };
 use p3_parser::Message;
 use sqlx::SqlitePool;
@@ -29,10 +33,16 @@ use crate::engine::{RaceEngine, RacePhase};
 use crate::ingest::publisher::{
     RACE_CONTROL_STREAM_NAME, RACE_CONTROL_SUBJECT_PATTERN, RAW_INGEST_STREAM_NAME,
     RAW_INGEST_SUBJECT_PATTERN, connect_jetstream_and_provision_raw_race_events_and_race_control,
+    publish_dlq_envelope,
 };
 
 const RACE_WORKER_RAW_CONSUMER: &str = "race_worker_raw_v1";
 const RACE_WORKER_CONTROL_CONSUMER: &str = "race_worker_control_v1";
+const CONSUMER_ACK_WAIT_SECS: u64 = 30;
+const CONSUMER_MAX_DELIVER: i64 = 10;
+const RETRY_DELAY_SECS: u64 = 2;
+const DLQ_SOURCE_RAW: &str = "race_worker_raw";
+const DLQ_SOURCE_CONTROL: &str = "race_worker_control";
 
 enum TrackActorPayload {
     Raw(RawIngestEnvelopeV1),
@@ -46,13 +56,13 @@ struct TrackActorInput {
 
 enum ActorDispatchOutcome {
     Processed,
-    Failed,
+    Failed(anyhow::Error),
 }
 
 enum DedupedDispatchOutcome {
     Duplicate,
     Processed,
-    Failed,
+    Failed(anyhow::Error),
 }
 
 pub async fn run_race_worker(nats_url: &str, pool: &SqlitePool) -> anyhow::Result<()> {
@@ -134,7 +144,16 @@ async fn handle_raw_message(
     let envelope: RawIngestEnvelopeV1 = match serde_json::from_slice(&message.payload) {
         Ok(envelope) => envelope,
         Err(error) => {
-            warn!(error = %error, "Failed to parse raw ingest envelope, acking poison message");
+            let failure_reason = format!("Failed to parse raw ingest envelope: {error}");
+            publish_message_to_dlq(
+                jetstream,
+                &message,
+                DLQ_SOURCE_RAW,
+                None,
+                None,
+                failure_reason,
+            )
+            .await?;
             message
                 .ack()
                 .await
@@ -147,6 +166,7 @@ async fn handle_raw_message(
         "raw:{}",
         build_idempotency_key(&envelope.track_id, &envelope.event_id_context)
     );
+    let event_id_for_dlq = envelope.event_id.to_string();
     let track_id = envelope.track_id.clone();
 
     let dispatch = dispatch_with_dedupe(pool, &dedupe_key, &track_id, DedupeSource::Raw, || {
@@ -172,7 +192,17 @@ async fn handle_raw_message(
                 .await
                 .map_err(|error| anyhow!("Failed to ack processed raw message: {error}"))?;
         }
-        DedupedDispatchOutcome::Failed => {}
+        DedupedDispatchOutcome::Failed(error) => {
+            handle_processing_failure(
+                &message,
+                jetstream,
+                DLQ_SOURCE_RAW,
+                Some(event_id_for_dlq),
+                Some(track_id),
+                error.to_string(),
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -195,7 +225,16 @@ async fn handle_control_message(
     let envelope: RaceControlIntentEnvelopeV1 = match serde_json::from_slice(&message.payload) {
         Ok(envelope) => envelope,
         Err(error) => {
-            warn!(error = %error, "Failed to parse race control envelope, acking poison message");
+            let failure_reason = format!("Failed to parse race control envelope: {error}");
+            publish_message_to_dlq(
+                jetstream,
+                &message,
+                DLQ_SOURCE_CONTROL,
+                None,
+                None,
+                failure_reason,
+            )
+            .await?;
             message
                 .ack()
                 .await
@@ -205,6 +244,7 @@ async fn handle_control_message(
     };
 
     let dedupe_key = format!("control:{}:{}", envelope.track_id, envelope.event_id);
+    let event_id_for_dlq = envelope.event_id.to_string();
     let track_id = envelope.track_id.clone();
 
     let dispatch =
@@ -231,7 +271,17 @@ async fn handle_control_message(
                 .await
                 .map_err(|error| anyhow!("Failed to ack processed control message: {error}"))?;
         }
-        DedupedDispatchOutcome::Failed => {}
+        DedupedDispatchOutcome::Failed(error) => {
+            handle_processing_failure(
+                &message,
+                jetstream,
+                DLQ_SOURCE_CONTROL,
+                Some(event_id_for_dlq),
+                Some(track_id),
+                error.to_string(),
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -259,11 +309,11 @@ where
     let outcome = dispatch().await;
     match outcome {
         ActorDispatchOutcome::Processed => Ok(DedupedDispatchOutcome::Processed),
-        ActorDispatchOutcome::Failed => {
+        ActorDispatchOutcome::Failed(error) => {
             if let Err(error) = race_worker_dedupe::release(pool, dedupe_key).await {
                 warn!(error = %error, key = %dedupe_key, "Failed to release race-worker dedupe claim after processing failure");
             }
-            Ok(DedupedDispatchOutcome::Failed)
+            Ok(DedupedDispatchOutcome::Failed(error))
         }
     }
 }
@@ -285,20 +335,15 @@ async fn dispatch_to_track_actor(
         .await
         .is_err()
     {
-        warn!("Race track actor unavailable, leaving message unacked");
-        return ActorDispatchOutcome::Failed;
+        return ActorDispatchOutcome::Failed(anyhow!("Race track actor unavailable"));
     }
 
     match result_rx.await {
         Ok(Ok(())) => ActorDispatchOutcome::Processed,
         Ok(Err(error)) => {
-            warn!(error = %error, "Race actor processing failed, leaving message unacked");
-            ActorDispatchOutcome::Failed
+            ActorDispatchOutcome::Failed(anyhow!("Race actor processing failed: {error}"))
         }
-        Err(error) => {
-            warn!(error = %error, "Race actor dropped response, leaving message unacked");
-            ActorDispatchOutcome::Failed
-        }
+        Err(error) => ActorDispatchOutcome::Failed(anyhow!("Race actor dropped response: {error}")),
     }
 }
 
@@ -318,6 +363,8 @@ async fn get_or_create_consumer(
         durable_name: Some(durable_name.to_string()),
         filter_subject: filter_subject.to_string(),
         ack_policy: AckPolicy::Explicit,
+        ack_wait: Duration::from_secs(CONSUMER_ACK_WAIT_SECS),
+        max_deliver: CONSUMER_MAX_DELIVER,
         ..Default::default()
     };
 
@@ -385,6 +432,18 @@ async fn process_raw_envelope(
                 raw.captured_at_us,
                 payload,
                 msg_id,
+            )
+            .await?;
+        }
+
+        if let Some(snapshot_payload) = map_domain_event_to_payload(engine.state_snapshot()) {
+            publish_snapshot_payload(
+                jetstream,
+                track_id,
+                raw.event_id,
+                raw.captured_at_us,
+                snapshot_payload,
+                format!("{track_id}:{}:snapshot", raw.event_id),
             )
             .await?;
         }
@@ -489,6 +548,16 @@ async fn process_control_envelope(
     }
 
     if let Some(snapshot_payload) = map_domain_event_to_payload(engine.state_snapshot()) {
+        publish_snapshot_payload(
+            jetstream,
+            track_id,
+            control.event_id,
+            control.ts_us,
+            snapshot_payload.clone(),
+            format!("{track_id}:{}:control:snapshot", control.event_id),
+        )
+        .await?;
+
         publish_event_payload(
             jetstream,
             track_id,
@@ -534,6 +603,119 @@ async fn publish_event_payload(
         .await?;
 
     Ok(())
+}
+
+async fn publish_snapshot_payload(
+    jetstream: &jetstream::Context,
+    track_id: &str,
+    source_event_id: Uuid,
+    ts_us: u64,
+    payload: RaceEventPayloadV1,
+    msg_id: String,
+) -> anyhow::Result<()> {
+    let event_scope_id = snapshot_scope_event_id(&payload);
+    let subject = build_race_snapshot_subject(track_id, &event_scope_id);
+    let envelope = RaceSnapshotEnvelopeV1 {
+        event_id: Uuid::new_v4(),
+        contract_version: RACE_SNAPSHOT_ENVELOPE_CONTRACT_VERSION_V1.to_string(),
+        track_id: track_id.to_string(),
+        event_scope_id,
+        source_event_id,
+        ts_us,
+        payload,
+    };
+    let body = serde_json::to_vec(&envelope)?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert("Nats-Msg-Id", msg_id);
+
+    jetstream
+        .publish_with_headers(subject, headers, body.into())
+        .await?
+        .await?;
+
+    Ok(())
+}
+
+fn snapshot_scope_event_id(payload: &RaceEventPayloadV1) -> String {
+    match payload {
+        RaceEventPayloadV1::StateSnapshot {
+            moto_id: Some(moto_id),
+            ..
+        } => moto_id.clone(),
+        _ => "none".to_string(),
+    }
+}
+
+async fn handle_processing_failure(
+    message: &jetstream::Message,
+    jetstream: &jetstream::Context,
+    source: &str,
+    event_id: Option<String>,
+    track_id: Option<String>,
+    failure_reason: String,
+) -> anyhow::Result<()> {
+    let delivered = message.info().ok().map(|info| info.delivered);
+    if should_route_to_dlq(delivered, CONSUMER_MAX_DELIVER) {
+        publish_message_to_dlq(
+            jetstream,
+            message,
+            source,
+            event_id,
+            track_id,
+            format!(
+                "{failure_reason}; max deliveries reached (delivered={})",
+                delivered.unwrap_or_default()
+            ),
+        )
+        .await?;
+
+        message
+            .ack()
+            .await
+            .map_err(|error| anyhow!("Failed to ack terminal {source} message: {error}"))?;
+    } else {
+        message
+            .ack_with(AckKind::Nak(Some(Duration::from_secs(RETRY_DELAY_SECS))))
+            .await
+            .map_err(|error| anyhow!("Failed to nak {source} message: {error}"))?;
+    }
+
+    Ok(())
+}
+
+fn should_route_to_dlq(delivered: Option<i64>, max_deliver: i64) -> bool {
+    delivered.is_some_and(|attempt| attempt >= max_deliver)
+}
+
+async fn publish_message_to_dlq(
+    jetstream: &jetstream::Context,
+    message: &jetstream::Message,
+    source: &str,
+    event_id: Option<String>,
+    track_id: Option<String>,
+    failure_reason: String,
+) -> anyhow::Result<()> {
+    let info = message.info().ok();
+    let envelope = DlqEnvelopeV1 {
+        event_id: event_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+        contract_version: DLQ_ENVELOPE_CONTRACT_VERSION_V1.to_string(),
+        source: source.to_string(),
+        track_id,
+        stream: info.as_ref().map(|info| info.stream.to_string()),
+        consumer: info.as_ref().map(|info| info.consumer.to_string()),
+        subject: Some(message.subject.to_string()),
+        delivered: info.as_ref().map(|info| info.delivered),
+        failure_reason,
+        original_payload: String::from_utf8_lossy(&message.payload).to_string(),
+        failed_at_us: now_unix_micros()?,
+    };
+    publish_dlq_envelope(jetstream, &envelope).await
+}
+
+fn now_unix_micros() -> anyhow::Result<u64> {
+    let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    Ok(duration.as_micros().try_into()?)
 }
 
 fn map_domain_event_to_payload(event: RaceEvent) -> Option<RaceEventPayloadV1> {
@@ -823,7 +1005,7 @@ mod tests {
         let key = "raw:track-a:client-a:boot-a:7";
 
         let first = dispatch_with_dedupe(&pool, key, "track-a", DedupeSource::Raw, || async {
-            ActorDispatchOutcome::Failed
+            ActorDispatchOutcome::Failed(anyhow!("boom"))
         })
         .await
         .unwrap();
@@ -834,8 +1016,21 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(matches!(first, DedupedDispatchOutcome::Failed));
+        assert!(matches!(first, DedupedDispatchOutcome::Failed(_)));
         assert!(matches!(second, DedupedDispatchOutcome::Processed));
+    }
+
+    #[test]
+    fn dlq_routing_only_on_terminal_attempt() {
+        assert!(!should_route_to_dlq(None, CONSUMER_MAX_DELIVER));
+        assert!(!should_route_to_dlq(
+            Some(CONSUMER_MAX_DELIVER - 1),
+            CONSUMER_MAX_DELIVER
+        ));
+        assert!(should_route_to_dlq(
+            Some(CONSUMER_MAX_DELIVER),
+            CONSUMER_MAX_DELIVER
+        ));
     }
 
     async fn test_pool() -> SqlitePool {

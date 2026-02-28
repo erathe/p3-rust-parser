@@ -65,6 +65,10 @@ struct Args {
     /// HTTP request timeout in seconds
     #[arg(long, default_value = "10")]
     http_timeout_secs: u64,
+
+    /// Optional auth token sent as Authorization: Bearer <token>
+    #[arg(long)]
+    auth_token: Option<String>,
 }
 
 #[tokio::main]
@@ -255,7 +259,14 @@ async fn flush_spool_batch(
         events,
     };
 
-    let response = http.post(ingest_url).json(&request).send().await;
+    let mut request_builder = http.post(ingest_url).json(&request);
+    if let Some(token) = args.auth_token.as_deref().map(str::trim)
+        && !token.is_empty()
+    {
+        request_builder = request_builder.bearer_auth(token);
+    }
+
+    let response = request_builder.send().await;
     match response {
         Ok(resp) if resp.status().is_success() => {
             let body = resp.json::<TrackIngestBatchResponse>().await;

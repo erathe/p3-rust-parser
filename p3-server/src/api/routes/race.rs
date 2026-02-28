@@ -160,12 +160,6 @@ pub async fn stage(
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to publish stage intent: {e}")))?;
 
-    // Update moto status to staged
-    sqlx::query("UPDATE motos SET status = 'staged' WHERE id = ?")
-        .bind(&req.moto_id)
-        .execute(&state.db)
-        .await?;
-
     let snapshot = RaceEvent::StateSnapshot {
         phase: "staged".to_string(),
         moto_id: Some(req.moto_id),
@@ -414,4 +408,106 @@ fn now_unix_micros() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_micros().try_into().unwrap_or(u64::MAX))
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::metrics::AppMetrics;
+    use p3_parser::Message;
+    use std::sync::Arc;
+    use tokio::sync::broadcast;
+
+    async fn test_state() -> AppState {
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::run_migrations(&db).await.unwrap();
+
+        let (message_tx, _) = broadcast::channel::<Arc<Message>>(32);
+        AppState::new(
+            message_tx,
+            db,
+            None,
+            "nats://127.0.0.1:4222".to_string(),
+            false,
+            crate::api::auth::TrackAuthConfig::disabled(),
+            Arc::new(AppMetrics::new()),
+        )
+    }
+
+    async fn seed_minimal_stage_data(state: &AppState) {
+        sqlx::query(
+            "INSERT INTO tracks (id, name, hill_type, gate_beacon_id) VALUES ('track-1', 'Track 1', '8m', 9992)",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO timing_loops (id, track_id, name, decoder_id, position, is_start, is_finish) \
+             VALUES ('loop-1', 'track-1', 'Start', 'D1000C00', 0, 1, 0)",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO events (id, name, date, track_id, status) VALUES ('event-1', 'Event 1', '2026-01-01', 'track-1', 'setup')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO event_classes (id, event_id, name, race_format, scoring) \
+             VALUES ('class-1', 'event-1', 'Class 1', 'motos_only', 'total_points')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO riders (id, first_name, last_name, plate_number, transponder_id) \
+             VALUES ('rider-1', 'Ada', 'Racer', '1', 1001)",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO motos (id, event_id, class_id, round_type, round_number, sequence, status) \
+             VALUES ('moto-1', 'event-1', 'class-1', 'moto1', 1, 1, 'pending')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO moto_entries (id, moto_id, rider_id, lane) VALUES ('entry-1', 'moto-1', 'rider-1', 1)",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn stage_does_not_mutate_moto_status_when_projection_has_not_run() {
+        let state = test_state().await;
+        seed_minimal_stage_data(&state).await;
+
+        let result = stage(
+            State(state.clone()),
+            Json(StageRequest {
+                moto_id: "moto-1".to_string(),
+                track_id: "track-1".to_string(),
+            }),
+        )
+        .await;
+        assert!(result.is_err());
+
+        let status: String = sqlx::query_scalar("SELECT status FROM motos WHERE id = 'moto-1'")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(status, "pending");
+    }
 }

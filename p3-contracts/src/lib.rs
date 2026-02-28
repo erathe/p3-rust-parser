@@ -5,6 +5,8 @@ use uuid::Uuid;
 pub const TRACK_INGEST_CONTRACT_VERSION_V2: &str = "track_ingest.v2";
 pub const RAW_INGEST_ENVELOPE_CONTRACT_VERSION_V1: &str = "raw_ingest_envelope.v1";
 pub const RACE_EVENTS_ENVELOPE_CONTRACT_VERSION_V1: &str = "race_events_envelope.v1";
+pub const RACE_SNAPSHOT_ENVELOPE_CONTRACT_VERSION_V1: &str = "race_snapshot_envelope.v1";
+pub const DLQ_ENVELOPE_CONTRACT_VERSION_V1: &str = "dlq_envelope.v1";
 pub const RACE_CONTROL_INTENT_ENVELOPE_CONTRACT_VERSION_V1: &str =
     "race_control_intent_envelope.v1";
 pub const RACE_CONTROL_SUBJECT_PATTERN_V1: &str = "timing.race.control.v1.*";
@@ -181,6 +183,32 @@ pub struct RaceEventEnvelopeV1 {
     pub payload: RaceEventPayloadV1,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaceSnapshotEnvelopeV1 {
+    pub event_id: Uuid,
+    pub contract_version: String,
+    pub track_id: String,
+    pub event_scope_id: String,
+    pub source_event_id: Uuid,
+    pub ts_us: u64,
+    pub payload: RaceEventPayloadV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DlqEnvelopeV1 {
+    pub event_id: String,
+    pub contract_version: String,
+    pub source: String,
+    pub track_id: Option<String>,
+    pub stream: Option<String>,
+    pub consumer: Option<String>,
+    pub subject: Option<String>,
+    pub delivered: Option<i64>,
+    pub failure_reason: String,
+    pub original_payload: String,
+    pub failed_at_us: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LiveEnvelopeKindV1 {
@@ -283,6 +311,14 @@ pub fn build_race_control_subject(track_id: &str) -> String {
     format!("timing.race.control.v1.{}", track_id)
 }
 
+pub fn build_race_snapshot_subject(track_id: &str, event_id: &str) -> String {
+    format!("timing.race.snapshot.v1.{}.{}", track_id, event_id)
+}
+
+pub fn build_dlq_subject(source: &str) -> String {
+    format!("timing.dlq.v1.{}", source)
+}
+
 pub fn build_raw_ingest_envelope_v1(
     event: &TrackIngestEvent,
     ingested_at_us: u64,
@@ -309,5 +345,22 @@ pub fn build_race_event_envelope_v1_from_raw(raw: &RawIngestEnvelopeV1) -> RaceE
         payload: RaceEventPayloadV1::DecoderMessage {
             message: raw.payload.clone(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_race_snapshot_subject() {
+        let subject = build_race_snapshot_subject("track-a", "moto-7");
+        assert_eq!(subject, "timing.race.snapshot.v1.track-a.moto-7");
+    }
+
+    #[test]
+    fn builds_dlq_subject() {
+        let subject = build_dlq_subject("race_worker_raw");
+        assert_eq!(subject, "timing.dlq.v1.race_worker_raw");
     }
 }
