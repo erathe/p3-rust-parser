@@ -38,7 +38,8 @@ pub struct PublishOutcome {
 
 impl IngestPublisher {
     pub async fn connect_and_provision(nats_url: &str) -> anyhow::Result<Self> {
-        let jetstream = connect_jetstream_and_provision_raw_race_events_and_race_control(nats_url).await?;
+        let jetstream =
+            connect_jetstream_and_provision_raw_race_events_and_race_control(nats_url).await?;
 
         Ok(Self { jetstream })
     }

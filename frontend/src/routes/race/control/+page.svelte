@@ -15,9 +15,22 @@
 	let trackId = $state<string>('');
 	let error = $state<string>('');
 	let loading = $state(false);
+	let mounted = $state(false);
+
+	$effect(() => {
+		if (!mounted) {
+			return;
+		}
+
+		if (trackId) {
+			race.connect(trackId);
+		} else {
+			race.disconnect();
+		}
+	});
 
 	onMount(() => {
-		race.connect();
+		mounted = true;
 		eventsApi.list().then((e) => { eventList = e; }).catch(() => {});
 		return () => race.disconnect();
 	});
@@ -58,10 +71,11 @@
 	}
 
 	async function handleReset() {
+		if (!trackId) return;
 		loading = true;
 		error = '';
 		try {
-			await raceApi.reset();
+			await raceApi.reset(trackId);
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -69,10 +83,11 @@
 	}
 
 	async function handleForceFinish() {
+		if (!trackId) return;
 		loading = true;
 		error = '';
 		try {
-			await raceApi.forceFinish();
+			await raceApi.forceFinish(trackId);
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -194,9 +209,9 @@
 			<div class="grid grid-cols-2 gap-2">
 				<button
 					onclick={handleForceFinish}
-					disabled={race.phase !== 'racing' || loading}
+					disabled={race.phase !== 'racing' || loading || !trackId}
 					class="py-2 rounded-lg font-medium text-sm transition-colors
-						{race.phase !== 'racing' || loading
+						{race.phase !== 'racing' || loading || !trackId
 							? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
 							: 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'}"
 				>
@@ -204,9 +219,9 @@
 				</button>
 				<button
 					onclick={handleReset}
-					disabled={race.phase === 'idle' || loading}
+					disabled={race.phase === 'idle' || loading || !trackId}
 					class="py-2 rounded-lg font-medium text-sm transition-colors
-						{race.phase === 'idle' || loading
+						{race.phase === 'idle' || loading || !trackId
 							? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
 							: 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'}"
 				>

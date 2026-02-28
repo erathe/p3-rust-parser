@@ -29,9 +29,7 @@ See `Justfile` for all dev recipes. Summary:
 2. **Axum backend** (HTTP/WS on `:3001`): `just server`
 3. **SvelteKit frontend** (Vite on `:5173`): `just frontend`
 
-Start in that order. The backend auto-connects to the decoder on `localhost:5403`. The frontend proxies `/api` and `/ws` to `localhost:3001` (configured in `frontend/vite.config.ts`).
-
-To run backend without a decoder: `just server-no-decoder`
+Start in that order. The backend runs in stream-only mode and expects ingest via `/api/ingest/batch` (typically from `p3-track-client`). The frontend proxies `/api` and `/ws` to `localhost:3001` (configured in `frontend/vite.config.ts`).
 
 ### Seeding demo data
 

@@ -204,11 +204,8 @@ pub async fn discovery(
 mod tests {
     use super::*;
     use crate::api::routes::dev_ingest::{IngestBatchRequest, IngestEvent, ingest_batch};
-    use crate::domain::race_event::RaceEvent;
-    use crate::engine::RaceEngine;
     use p3_parser::{PassingMessage, StatusMessage};
-    use std::sync::Arc;
-    use tokio::sync::{Mutex, broadcast};
+    use tokio::sync::broadcast;
 
     async fn test_state() -> AppState {
         let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -235,16 +232,7 @@ mod tests {
         .unwrap();
 
         let (message_tx, _) = broadcast::channel(32);
-        let (race_event_tx, _) = broadcast::channel::<Arc<RaceEvent>>(32);
-        let engine = Arc::new(Mutex::new(RaceEngine::new(race_event_tx.clone())));
-        AppState::new(
-            message_tx,
-            race_event_tx,
-            engine,
-            db,
-            None,
-            "nats://127.0.0.1:4222".to_string(),
-        )
+        AppState::new(message_tx, db, None, "nats://127.0.0.1:4222".to_string())
     }
 
     #[tokio::test]

@@ -25,11 +25,6 @@ test-server-idle:
 server:
     cargo run -p p3-server
 
-# Start the p3-server with no decoder connection (API/WebSocket only)
-# Requires a NATS JetStream instance on nats://127.0.0.1:4222.
-server-no-decoder:
-    cargo run -p p3-server -- --no-decoder
-
 # Start local NATS with JetStream and monitoring
 nats:
     docker run --rm -it -p 4222:4222 -p 8222:8222 nats:2.11-alpine -js -m 8222
@@ -44,7 +39,7 @@ track-client client_id track_id decoder_host="localhost" decoder_port="5403" cen
       --central-base-url {{central_url}}
 
 # Run live onboarding feed (test-server -> track-client -> central server)
-# Use with `just server-no-decoder` in another terminal for track-scoped ingest-only testing.
+# Use with `just server` in another terminal for track-scoped ingest-only testing.
 onboarding-feed client_id track_id riders="6" central_url="http://localhost:3001":
     #!/usr/bin/env bash
     set -euo pipefail

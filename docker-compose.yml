@@ -15,7 +15,6 @@ services:
     command:
       [
         "p3-server",
-        "--no-decoder",
         "--port",
         "3001",
         "--nats-url",

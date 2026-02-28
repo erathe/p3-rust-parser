@@ -14,7 +14,6 @@ use tower_http::trace::TraceLayer;
 pub fn router(state: AppState) -> Router {
     Router::new()
         // WebSocket
-        .route("/ws", get(ws::ws_handler))
         .route("/ws/v1/live", get(ws::ws_live_handler))
         // Tracks
         .route(

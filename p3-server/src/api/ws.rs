@@ -23,11 +23,9 @@ use super::state::AppState;
 use crate::db::queries::decoder_live::{
     DecoderSnapshotRow as DbDecoderSnapshotRow, list_decoder_snapshot_rows_for_track,
 };
-
-/// WebSocket upgrade handler — each connected client receives P3 messages and race events as JSON.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
-}
+use crate::db::queries::race_projection::{
+    ProjectedRaceState as DbProjectedRaceState, get_race_state_projection,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct LiveQuery {
@@ -93,75 +91,6 @@ pub async fn ws_live_handler(
     }))
 }
 
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    info!("WebSocket client connected");
-
-    // Send current race state snapshot to newly connected client
-    {
-        let engine = state.engine.lock().await;
-        let snapshot = engine.state_snapshot();
-        if let Ok(json) = serde_json::to_string(&snapshot) {
-            let _ = socket.send(WsMessage::text(json)).await;
-        }
-    }
-
-    let mut p3_rx = state.message_tx.subscribe();
-    let mut race_rx = state.race_event_tx.subscribe();
-
-    loop {
-        select! {
-            result = p3_rx.recv() => {
-                match result {
-                    Ok(message) => {
-                        let json = match serde_json::to_string(message.as_ref()) {
-                            Ok(j) => j,
-                            Err(e) => {
-                                warn!(error = %e, "Failed to serialize P3 message");
-                                continue;
-                            }
-                        };
-                        if socket.send(WsMessage::text(json)).await.is_err() {
-                            info!("WebSocket client disconnected");
-                            break;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "WebSocket client lagging on P3 messages");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("P3 broadcast channel closed");
-                        break;
-                    }
-                }
-            }
-            result = race_rx.recv() => {
-                match result {
-                    Ok(event) => {
-                        let json = match serde_json::to_string(event.as_ref()) {
-                            Ok(j) => j,
-                            Err(e) => {
-                                warn!(error = %e, "Failed to serialize race event");
-                                continue;
-                            }
-                        };
-                        if socket.send(WsMessage::text(json)).await.is_err() {
-                            info!("WebSocket client disconnected");
-                            break;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "WebSocket client lagging on race events");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("Race event broadcast channel closed");
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
 async fn handle_live_socket(
     socket: WebSocket,
     state: AppState,
@@ -173,8 +102,9 @@ async fn handle_live_socket(
     info!(track_id = %track_id, "WebSocket /ws/v1/live client connected");
 
     let stream_decoder_channel = channels.contains(&LiveChannelV1::Decoder);
+    let stream_race_channel = channels.contains(&LiveChannelV1::Race);
 
-    let mut nats_sub = if stream_decoder_channel {
+    let mut nats_sub = if stream_decoder_channel || stream_race_channel {
         let nats_client = match async_nats::connect(&state.nats_url).await {
             Ok(client) => client,
             Err(error) => {
@@ -201,46 +131,96 @@ async fn handle_live_socket(
     heartbeat.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     for channel in &channels {
-        if *channel != LiveChannelV1::Decoder {
-            continue;
-        }
+        match *channel {
+            LiveChannelV1::Decoder => {
+                let snapshot_rows =
+                    match list_decoder_snapshot_rows_for_track(&state.db, &track_id).await {
+                        Ok(rows) => rows,
+                        Err(error) => {
+                            warn!(
+                                error = %error,
+                                track_id = %track_id,
+                                "Failed to query decoder snapshot rows"
+                            );
+                            let envelope = LiveEnvelopeV1 {
+                                kind: LiveEnvelopeKindV1::Error,
+                                channel: *channel,
+                                track_id: track_id.clone(),
+                                event_id: requested_event_id.clone(),
+                                seq: seq.next(),
+                                ts_us: now_unix_micros(),
+                                payload: LiveErrorPayloadV1 {
+                                    code: "snapshot_query_failed".to_string(),
+                                    message: "Failed to load decoder snapshot".to_string(),
+                                    channel: Some("decoder".to_string()),
+                                },
+                            };
 
-        let snapshot_rows = match list_decoder_snapshot_rows_for_track(&state.db, &track_id).await {
-            Ok(rows) => rows,
-            Err(error) => {
-                warn!(error = %error, track_id = %track_id, "Failed to query decoder snapshot rows");
+                            if send_live_envelope(&mut sender, &envelope).await.is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                    };
+
                 let envelope = LiveEnvelopeV1 {
-                    kind: LiveEnvelopeKindV1::Error,
+                    kind: LiveEnvelopeKindV1::Snapshot,
                     channel: *channel,
                     track_id: track_id.clone(),
                     event_id: requested_event_id.clone(),
                     seq: seq.next(),
                     ts_us: now_unix_micros(),
-                    payload: LiveErrorPayloadV1 {
-                        code: "snapshot_query_failed".to_string(),
-                        message: "Failed to load decoder snapshot".to_string(),
-                        channel: Some("decoder".to_string()),
-                    },
+                    payload: map_decoder_snapshot_rows(snapshot_rows),
                 };
-
                 if send_live_envelope(&mut sender, &envelope).await.is_err() {
                     return;
                 }
-                continue;
             }
-        };
+            LiveChannelV1::Race => {
+                let snapshot_payload = match get_race_state_projection(&state.db, &track_id).await {
+                    Ok(Some(projected)) => map_race_snapshot_payload(projected),
+                    Ok(None) => idle_race_snapshot_payload(),
+                    Err(error) => {
+                        warn!(
+                            error = %error,
+                            track_id = %track_id,
+                            "Failed to query race snapshot"
+                        );
+                        let envelope = LiveEnvelopeV1 {
+                            kind: LiveEnvelopeKindV1::Error,
+                            channel: *channel,
+                            track_id: track_id.clone(),
+                            event_id: requested_event_id.clone(),
+                            seq: seq.next(),
+                            ts_us: now_unix_micros(),
+                            payload: LiveErrorPayloadV1 {
+                                code: "snapshot_query_failed".to_string(),
+                                message: "Failed to load race snapshot".to_string(),
+                                channel: Some("race".to_string()),
+                            },
+                        };
 
-        let envelope = LiveEnvelopeV1 {
-            kind: LiveEnvelopeKindV1::Snapshot,
-            channel: *channel,
-            track_id: track_id.clone(),
-            event_id: requested_event_id.clone(),
-            seq: seq.next(),
-            ts_us: now_unix_micros(),
-            payload: map_decoder_snapshot_rows(snapshot_rows),
-        };
-        if send_live_envelope(&mut sender, &envelope).await.is_err() {
-            return;
+                        if send_live_envelope(&mut sender, &envelope).await.is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                };
+
+                let envelope = LiveEnvelopeV1 {
+                    kind: LiveEnvelopeKindV1::Snapshot,
+                    channel: *channel,
+                    track_id: track_id.clone(),
+                    event_id: requested_event_id.clone(),
+                    seq: seq.next(),
+                    ts_us: now_unix_micros(),
+                    payload: snapshot_payload,
+                };
+                if send_live_envelope(&mut sender, &envelope).await.is_err() {
+                    return;
+                }
+            }
+            LiveChannelV1::Unknown => {}
         }
     }
 
@@ -271,7 +251,7 @@ async fn handle_live_socket(
                 } else {
                     None
                 }
-            }, if stream_decoder_channel => {
+            }, if stream_decoder_channel || stream_race_channel => {
                 let Some(message) = nats_message else {
                     break;
                 };
@@ -284,10 +264,26 @@ async fn handle_live_socket(
                     }
                 };
 
-                if let Some(payload) = map_decoder_event_payload(&derived) {
+                if stream_decoder_channel && let Some(payload) = map_decoder_event_payload(&derived) {
                     let envelope = LiveEnvelopeV1 {
                         kind: LiveEnvelopeKindV1::Event,
                         channel: LiveChannelV1::Decoder,
+                        track_id: track_id.clone(),
+                        event_id: Some(derived.event_id.to_string()),
+                        seq: seq.next(),
+                        ts_us: derived.ts_us,
+                        payload,
+                    };
+
+                    if send_live_envelope(&mut sender, &envelope).await.is_err() {
+                        break;
+                    }
+                }
+
+                if stream_race_channel && let Some(payload) = map_race_event_payload(&derived) {
+                    let envelope = LiveEnvelopeV1 {
+                        kind: LiveEnvelopeKindV1::Event,
+                        channel: LiveChannelV1::Race,
                         track_id: track_id.clone(),
                         event_id: Some(derived.event_id.to_string()),
                         seq: seq.next(),
@@ -351,7 +347,7 @@ fn classify_channels(raw: Option<&str>) -> ChannelSelection {
     let mut supported = BTreeSet::new();
     let mut issues = Vec::new();
 
-    let channels = raw.unwrap_or("decoder");
+    let channels = raw.unwrap_or("race");
     let is_defaulted = raw.is_none() || channels.trim().is_empty();
 
     for candidate in channels
@@ -363,12 +359,9 @@ fn classify_channels(raw: Option<&str>) -> ChannelSelection {
             "decoder" => {
                 supported.insert(LiveChannelV1::Decoder);
             }
-            "race" => issues.push(ChannelIssue {
-                requested_channel: "race".to_string(),
-                envelope_channel: LiveChannelV1::Race,
-                code: "unimplemented_channel",
-                message: "Channel 'race' is recognized but not implemented yet".to_string(),
-            }),
+            "race" => {
+                supported.insert(LiveChannelV1::Race);
+            }
             other => issues.push(ChannelIssue {
                 requested_channel: other.to_string(),
                 envelope_channel: LiveChannelV1::Unknown,
@@ -379,7 +372,7 @@ fn classify_channels(raw: Option<&str>) -> ChannelSelection {
     }
 
     if is_defaulted && supported.is_empty() {
-        supported.insert(LiveChannelV1::Decoder);
+        supported.insert(LiveChannelV1::Race);
     }
 
     ChannelSelection { supported, issues }
@@ -433,6 +426,41 @@ fn map_decoder_event_payload(derived: &RaceEventEnvelopeV1) -> Option<DecoderEve
     }
 }
 
+fn map_race_event_payload(derived: &RaceEventEnvelopeV1) -> Option<RaceEventPayloadV1> {
+    match &derived.payload {
+        RaceEventPayloadV1::DecoderMessage { .. } => None,
+        payload => Some(payload.clone()),
+    }
+}
+
+fn map_race_snapshot_payload(projected: DbProjectedRaceState) -> RaceEventPayloadV1 {
+    RaceEventPayloadV1::StateSnapshot {
+        phase: projected.phase,
+        moto_id: projected.moto_id,
+        class_name: projected.class_name,
+        round_type: projected.round_type,
+        riders: projected.riders,
+        positions: projected.positions,
+        gate_drop_time_us: projected.gate_drop_time_us,
+        finished_count: projected.finished_count,
+        total_riders: projected.total_riders,
+    }
+}
+
+fn idle_race_snapshot_payload() -> RaceEventPayloadV1 {
+    RaceEventPayloadV1::StateSnapshot {
+        phase: "idle".to_string(),
+        moto_id: None,
+        class_name: None,
+        round_type: None,
+        riders: Vec::new(),
+        positions: Vec::new(),
+        gate_drop_time_us: None,
+        finished_count: 0,
+        total_riders: 0,
+    }
+}
+
 fn now_unix_micros() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -447,32 +475,31 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn classify_channels_defaults_to_decoder() {
+    fn classify_channels_defaults_to_race() {
         let parsed = classify_channels(None);
-        assert_eq!(parsed.supported, BTreeSet::from([LiveChannelV1::Decoder]));
+        assert_eq!(parsed.supported, BTreeSet::from([LiveChannelV1::Race]));
         assert!(parsed.issues.is_empty());
 
         let parsed_empty = classify_channels(Some("   "));
         assert_eq!(
             parsed_empty.supported,
-            BTreeSet::from([LiveChannelV1::Decoder])
+            BTreeSet::from([LiveChannelV1::Race])
         );
         assert!(parsed_empty.issues.is_empty());
     }
 
     #[test]
-    fn classify_channels_tracks_unsupported_and_unimplemented() {
+    fn classify_channels_tracks_supported_and_unsupported() {
         let parsed = classify_channels(Some("decoder,race,invalid"));
-        assert_eq!(parsed.supported, BTreeSet::from([LiveChannelV1::Decoder]));
-        assert_eq!(parsed.issues.len(), 2);
+        assert_eq!(
+            parsed.supported,
+            BTreeSet::from([LiveChannelV1::Decoder, LiveChannelV1::Race])
+        );
+        assert_eq!(parsed.issues.len(), 1);
 
-        assert_eq!(parsed.issues[0].requested_channel, "race");
-        assert_eq!(parsed.issues[0].envelope_channel, LiveChannelV1::Race);
-        assert_eq!(parsed.issues[0].code, "unimplemented_channel");
-
-        assert_eq!(parsed.issues[1].requested_channel, "invalid");
-        assert_eq!(parsed.issues[1].envelope_channel, LiveChannelV1::Unknown);
-        assert_eq!(parsed.issues[1].code, "unsupported_channel");
+        assert_eq!(parsed.issues[0].requested_channel, "invalid");
+        assert_eq!(parsed.issues[0].envelope_channel, LiveChannelV1::Unknown);
+        assert_eq!(parsed.issues[0].code, "unsupported_channel");
     }
 
     #[test]

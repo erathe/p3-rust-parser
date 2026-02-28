@@ -131,14 +131,25 @@ export const seed = {
 
 // Race control
 export const race = {
-	getState: () => request<RaceStateResponse>('/race/state'),
+	getState: (trackId?: string) => {
+		const params = trackId ? `?track_id=${encodeURIComponent(trackId)}` : '';
+		return request<RaceStateResponse>(`/race/state${params}`);
+	},
 	stage: (motoId: string, trackId: string) =>
 		request<RaceStateResponse>('/race/stage', {
 			method: 'POST',
 			body: JSON.stringify({ moto_id: motoId, track_id: trackId })
 		}),
-	reset: () => request<RaceStateResponse>('/race/reset', { method: 'POST' }),
-	forceFinish: () => request<RaceStateResponse>('/race/force-finish', { method: 'POST' })
+	reset: (trackId: string) =>
+		request<RaceStateResponse>('/race/reset', {
+			method: 'POST',
+			body: JSON.stringify({ track_id: trackId })
+		}),
+	forceFinish: (trackId: string) =>
+		request<RaceStateResponse>('/race/force-finish', {
+			method: 'POST',
+			body: JSON.stringify({ track_id: trackId })
+		})
 };
 
 // Track onboarding

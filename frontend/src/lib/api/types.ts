@@ -333,3 +333,41 @@ export type RaceEventMessage =
 	| { event_type: 'race_finished'; moto_id: string; results: FinishResult[] }
 	| { event_type: 'race_reset' }
 	| { event_type: 'state_snapshot'; phase: string; moto_id: string | null; class_name: string | null; round_type: string | null; riders: StagedRider[]; positions: RiderPosition[]; gate_drop_time_us: number | null; finished_count: number; total_riders: number };
+
+export type RaceLivePayload =
+	| { kind: 'race_staged'; moto_id: string; class_name: string; round_type: string; riders: StagedRider[] }
+	| { kind: 'gate_drop'; moto_id: string; timestamp_us: number }
+	| { kind: 'split_time'; moto_id: string; rider_id: string; loop_name: string; is_finish: boolean; elapsed_us: number; position: number; gap_to_leader_us: number | null }
+	| { kind: 'positions_update'; moto_id: string; positions: RiderPosition[] }
+	| { kind: 'rider_finished'; moto_id: string; rider_id: string; finish_position: number; elapsed_us: number; gap_to_leader_us: number | null }
+	| { kind: 'race_finished'; moto_id: string; results: FinishResult[] }
+	| { kind: 'race_reset' }
+	| { kind: 'state_snapshot'; phase: string; moto_id: string | null; class_name: string | null; round_type: string | null; riders: StagedRider[]; positions: RiderPosition[]; gate_drop_time_us: number | null; finished_count: number; total_riders: number };
+
+export interface RaceSnapshotEnvelope extends LiveEnvelopeBase {
+	kind: 'snapshot';
+	channel: 'race';
+	payload: RaceLivePayload;
+}
+
+export interface RaceEventEnvelope extends LiveEnvelopeBase {
+	kind: 'event';
+	channel: 'race';
+	payload: RaceLivePayload;
+}
+
+export interface RaceHeartbeatEnvelope extends LiveEnvelopeBase {
+	kind: 'heartbeat';
+	payload: Record<string, never>;
+}
+
+export interface RaceErrorEnvelope extends LiveEnvelopeBase {
+	kind: 'error';
+	payload: LiveErrorPayload;
+}
+
+export type RaceLiveEnvelope =
+	| RaceSnapshotEnvelope
+	| RaceEventEnvelope
+	| RaceHeartbeatEnvelope
+	| RaceErrorEnvelope;

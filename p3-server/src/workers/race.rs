@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use async_nats::error::Error as NatsError;
 use async_nats::HeaderMap;
+use async_nats::error::Error as NatsError;
 use async_nats::jetstream;
-use async_nats::jetstream::consumer::pull::MessagesErrorKind;
 use async_nats::jetstream::consumer::AckPolicy;
+use async_nats::jetstream::consumer::pull::MessagesErrorKind;
 use futures_util::StreamExt;
 use p3_contracts::{
     FinishResultV1, LoopConfigV1, RACE_EVENTS_ENVELOPE_CONTRACT_VERSION_V1,
@@ -18,7 +18,9 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::domain::race_event::{FinishResult, LoopConfig, RaceEvent, RiderPosition, StagedRider, TrackConfig};
+use crate::domain::race_event::{
+    FinishResult, LoopConfig, RaceEvent, RiderPosition, StagedRider, TrackConfig,
+};
 use crate::engine::{RaceEngine, RacePhase};
 use crate::ingest::publisher::{
     RACE_CONTROL_STREAM_NAME, RACE_CONTROL_SUBJECT_PATTERN, RAW_INGEST_STREAM_NAME,
@@ -39,7 +41,8 @@ struct TrackActorInput {
 }
 
 pub async fn run_race_worker(nats_url: &str) -> anyhow::Result<()> {
-    let jetstream = connect_jetstream_and_provision_raw_race_events_and_race_control(nats_url).await?;
+    let jetstream =
+        connect_jetstream_and_provision_raw_race_events_and_race_control(nats_url).await?;
     let raw_stream = jetstream.get_stream(RAW_INGEST_STREAM_NAME).await?;
     let control_stream = jetstream.get_stream(RACE_CONTROL_STREAM_NAME).await?;
     let raw_consumer = get_or_create_consumer(
@@ -182,7 +185,11 @@ async fn dispatch_to_track_actor(
         .clone();
 
     let (result_tx, result_rx) = oneshot::channel();
-    if actor.send(TrackActorInput { payload, result_tx }).await.is_err() {
+    if actor
+        .send(TrackActorInput { payload, result_tx })
+        .await
+        .is_err()
+    {
         warn!("Race track actor unavailable, leaving message unacked");
         return Ok(());
     }
@@ -337,7 +344,10 @@ async fn process_control_envelope(
                             round_type: round_type.clone(),
                             riders: riders.clone(),
                         },
-                        format!("{track_id}:{}:control:{index}:race_staged", control.event_id),
+                        format!(
+                            "{track_id}:{}:control:{index}:race_staged",
+                            control.event_id
+                        ),
                     )
                     .await?;
                     index += 1;
@@ -377,7 +387,10 @@ async fn process_control_envelope(
                     control.event_id,
                     control.ts_us,
                     payload,
-                    format!("{track_id}:{}:control:{index}:race_finished", control.event_id),
+                    format!(
+                        "{track_id}:{}:control:{index}:race_finished",
+                        control.event_id
+                    ),
                 )
                 .await?;
                 index += 1;
@@ -392,7 +405,10 @@ async fn process_control_envelope(
             control.event_id,
             control.ts_us,
             snapshot_payload,
-            format!("{track_id}:{}:control:{index}:state_snapshot", control.event_id),
+            format!(
+                "{track_id}:{}:control:{index}:state_snapshot",
+                control.event_id
+            ),
         )
         .await?;
     }
@@ -441,7 +457,10 @@ fn map_domain_event_to_payload(event: RaceEvent) -> Option<RaceEventPayloadV1> {
             moto_id,
             class_name,
             round_type,
-            riders: riders.into_iter().map(map_staged_rider_from_domain).collect(),
+            riders: riders
+                .into_iter()
+                .map(map_staged_rider_from_domain)
+                .collect(),
         }),
         RaceEvent::GateDrop {
             moto_id,
@@ -470,7 +489,10 @@ fn map_domain_event_to_payload(event: RaceEvent) -> Option<RaceEventPayloadV1> {
         RaceEvent::PositionsUpdate { moto_id, positions } => {
             Some(RaceEventPayloadV1::PositionsUpdate {
                 moto_id,
-                positions: positions.into_iter().map(map_position_from_domain).collect(),
+                positions: positions
+                    .into_iter()
+                    .map(map_position_from_domain)
+                    .collect(),
             })
         }
         RaceEvent::RiderFinished {
@@ -506,8 +528,14 @@ fn map_domain_event_to_payload(event: RaceEvent) -> Option<RaceEventPayloadV1> {
             moto_id,
             class_name,
             round_type,
-            riders: riders.into_iter().map(map_staged_rider_from_domain).collect(),
-            positions: positions.into_iter().map(map_position_from_domain).collect(),
+            riders: riders
+                .into_iter()
+                .map(map_staged_rider_from_domain)
+                .collect(),
+            positions: positions
+                .into_iter()
+                .map(map_position_from_domain)
+                .collect(),
             gate_drop_time_us,
             finished_count,
             total_riders,
