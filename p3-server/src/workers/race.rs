@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -11,13 +12,16 @@ use futures_util::StreamExt;
 use p3_contracts::{
     FinishResultV1, LoopConfigV1, RACE_EVENTS_ENVELOPE_CONTRACT_VERSION_V1,
     RaceControlIntentEnvelopeV1, RaceControlIntentV1, RaceEventEnvelopeV1, RaceEventPayloadV1,
-    RawIngestEnvelopeV1, RiderPositionV1, StagedRiderV1, TrackConfigV1, build_race_events_subject,
+    RawIngestEnvelopeV1, RiderPositionV1, StagedRiderV1, TrackConfigV1, build_idempotency_key,
+    build_race_events_subject,
 };
 use p3_parser::Message;
+use sqlx::SqlitePool;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::db::queries::race_worker_dedupe::{self, ClaimOutcome, DedupeSource};
 use crate::domain::race_event::{
     FinishResult, LoopConfig, RaceEvent, RiderPosition, StagedRider, TrackConfig,
 };
@@ -40,7 +44,18 @@ struct TrackActorInput {
     result_tx: oneshot::Sender<anyhow::Result<()>>,
 }
 
-pub async fn run_race_worker(nats_url: &str) -> anyhow::Result<()> {
+enum ActorDispatchOutcome {
+    Processed,
+    Failed,
+}
+
+enum DedupedDispatchOutcome {
+    Duplicate,
+    Processed,
+    Failed,
+}
+
+pub async fn run_race_worker(nats_url: &str, pool: &SqlitePool) -> anyhow::Result<()> {
     let jetstream =
         connect_jetstream_and_provision_raw_race_events_and_race_control(nats_url).await?;
     let raw_stream = jetstream.get_stream(RAW_INGEST_STREAM_NAME).await?;
@@ -77,7 +92,7 @@ pub async fn run_race_worker(nats_url: &str) -> anyhow::Result<()> {
             raw_message_result = raw_messages.next(), if raw_open => {
                 match raw_message_result {
                     Some(message_result) => {
-                        handle_raw_message(&jetstream, &mut track_actors, message_result).await?;
+                        handle_raw_message(pool, &jetstream, &mut track_actors, message_result).await?;
                     }
                     None => {
                         raw_open = false;
@@ -88,7 +103,7 @@ pub async fn run_race_worker(nats_url: &str) -> anyhow::Result<()> {
             control_message_result = control_messages.next(), if control_open => {
                 match control_message_result {
                     Some(message_result) => {
-                        handle_control_message(&jetstream, &mut track_actors, message_result).await?;
+                        handle_control_message(pool, &jetstream, &mut track_actors, message_result).await?;
                     }
                     None => {
                         control_open = false;
@@ -103,6 +118,7 @@ pub async fn run_race_worker(nats_url: &str) -> anyhow::Result<()> {
 }
 
 async fn handle_raw_message(
+    pool: &SqlitePool,
     jetstream: &jetstream::Context,
     track_actors: &mut HashMap<String, mpsc::Sender<TrackActorInput>>,
     message_result: Result<jetstream::Message, NatsError<MessagesErrorKind>>,
@@ -127,17 +143,43 @@ async fn handle_raw_message(
         }
     };
 
-    dispatch_to_track_actor(
-        track_actors,
-        envelope.track_id.clone(),
-        jetstream.clone(),
-        TrackActorPayload::Raw(envelope),
-        message,
-    )
-    .await
+    let dedupe_key = format!(
+        "raw:{}",
+        build_idempotency_key(&envelope.track_id, &envelope.event_id_context)
+    );
+    let track_id = envelope.track_id.clone();
+
+    let dispatch = dispatch_with_dedupe(pool, &dedupe_key, &track_id, DedupeSource::Raw, || {
+        dispatch_to_track_actor(
+            track_actors,
+            track_id.clone(),
+            jetstream.clone(),
+            TrackActorPayload::Raw(envelope),
+        )
+    })
+    .await?;
+
+    match dispatch {
+        DedupedDispatchOutcome::Duplicate => {
+            message
+                .ack()
+                .await
+                .map_err(|error| anyhow!("Failed to ack duplicate raw message: {error}"))?;
+        }
+        DedupedDispatchOutcome::Processed => {
+            message
+                .ack()
+                .await
+                .map_err(|error| anyhow!("Failed to ack processed raw message: {error}"))?;
+        }
+        DedupedDispatchOutcome::Failed => {}
+    }
+
+    Ok(())
 }
 
 async fn handle_control_message(
+    pool: &SqlitePool,
     jetstream: &jetstream::Context,
     track_actors: &mut HashMap<String, mpsc::Sender<TrackActorInput>>,
     message_result: Result<jetstream::Message, NatsError<MessagesErrorKind>>,
@@ -162,14 +204,68 @@ async fn handle_control_message(
         }
     };
 
-    dispatch_to_track_actor(
-        track_actors,
-        envelope.track_id.clone(),
-        jetstream.clone(),
-        TrackActorPayload::Control(envelope),
-        message,
-    )
-    .await
+    let dedupe_key = format!("control:{}:{}", envelope.track_id, envelope.event_id);
+    let track_id = envelope.track_id.clone();
+
+    let dispatch =
+        dispatch_with_dedupe(pool, &dedupe_key, &track_id, DedupeSource::Control, || {
+            dispatch_to_track_actor(
+                track_actors,
+                track_id.clone(),
+                jetstream.clone(),
+                TrackActorPayload::Control(envelope),
+            )
+        })
+        .await?;
+
+    match dispatch {
+        DedupedDispatchOutcome::Duplicate => {
+            message
+                .ack()
+                .await
+                .map_err(|error| anyhow!("Failed to ack duplicate control message: {error}"))?;
+        }
+        DedupedDispatchOutcome::Processed => {
+            message
+                .ack()
+                .await
+                .map_err(|error| anyhow!("Failed to ack processed control message: {error}"))?;
+        }
+        DedupedDispatchOutcome::Failed => {}
+    }
+
+    Ok(())
+}
+
+async fn dispatch_with_dedupe<F, Fut>(
+    pool: &SqlitePool,
+    dedupe_key: &str,
+    track_id: &str,
+    source: DedupeSource,
+    dispatch: F,
+) -> anyhow::Result<DedupedDispatchOutcome>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = ActorDispatchOutcome>,
+{
+    match race_worker_dedupe::claim(pool, dedupe_key, track_id, source)
+        .await
+        .map_err(|error| anyhow!("Failed to claim race-worker dedupe key: {error}"))?
+    {
+        ClaimOutcome::Duplicate => return Ok(DedupedDispatchOutcome::Duplicate),
+        ClaimOutcome::Claimed => {}
+    }
+
+    let outcome = dispatch().await;
+    match outcome {
+        ActorDispatchOutcome::Processed => Ok(DedupedDispatchOutcome::Processed),
+        ActorDispatchOutcome::Failed => {
+            if let Err(error) = race_worker_dedupe::release(pool, dedupe_key).await {
+                warn!(error = %error, key = %dedupe_key, "Failed to release race-worker dedupe claim after processing failure");
+            }
+            Ok(DedupedDispatchOutcome::Failed)
+        }
+    }
 }
 
 async fn dispatch_to_track_actor(
@@ -177,8 +273,7 @@ async fn dispatch_to_track_actor(
     track_id: String,
     jetstream: jetstream::Context,
     payload: TrackActorPayload,
-    message: jetstream::Message,
-) -> anyhow::Result<()> {
+) -> ActorDispatchOutcome {
     let actor = track_actors
         .entry(track_id.clone())
         .or_insert_with(|| spawn_track_actor(track_id, jetstream))
@@ -191,25 +286,20 @@ async fn dispatch_to_track_actor(
         .is_err()
     {
         warn!("Race track actor unavailable, leaving message unacked");
-        return Ok(());
+        return ActorDispatchOutcome::Failed;
     }
 
     match result_rx.await {
-        Ok(Ok(())) => {
-            message
-                .ack()
-                .await
-                .map_err(|error| anyhow!("Failed to ack processed message: {error}"))?;
-        }
+        Ok(Ok(())) => ActorDispatchOutcome::Processed,
         Ok(Err(error)) => {
             warn!(error = %error, "Race actor processing failed, leaving message unacked");
+            ActorDispatchOutcome::Failed
         }
         Err(error) => {
             warn!(error = %error, "Race actor dropped response, leaving message unacked");
+            ActorDispatchOutcome::Failed
         }
     }
-
-    Ok(())
 }
 
 async fn get_or_create_consumer(
@@ -612,5 +702,218 @@ fn map_result_from_domain(result: FinishResult) -> FinishResultV1 {
         gap_to_leader_us: result.gap_to_leader_us,
         dnf: result.dnf,
         dns: result.dns,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use p3_contracts::EventIdContext;
+    use p3_parser::PassingMessage;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn redelivered_raw_message_is_skipped_and_state_is_unchanged() {
+        let pool = test_pool().await;
+        let mut engine = test_engine();
+
+        engine.set_track(test_track_config());
+        engine.stage_moto(
+            "moto-1".to_string(),
+            "Open".to_string(),
+            "main".to_string(),
+            vec![test_staged_rider()],
+        );
+
+        let gate_drop = test_passing(1, 9992, 1_000_000, Some("START"));
+        let _ = engine.process_passing(&gate_drop);
+
+        let split = test_passing(2, 1001, 1_250_000, Some("SPLIT"));
+        let event_id_context = EventIdContext {
+            client_id: "client-a".to_string(),
+            boot_id: "boot-a".to_string(),
+            seq: 42,
+        };
+        let dedupe_key = format!(
+            "raw:{}",
+            build_idempotency_key("track-a", &event_id_context)
+        );
+
+        let first =
+            dispatch_with_dedupe(&pool, &dedupe_key, "track-a", DedupeSource::Raw, || async {
+                let events = engine.process_passing(&split);
+                assert_eq!(events.len(), 2);
+                ActorDispatchOutcome::Processed
+            })
+            .await
+            .unwrap();
+        let snapshot_after_first = serde_json::to_value(engine.state_snapshot()).unwrap();
+
+        let mut duplicate_was_processed = false;
+        let second =
+            dispatch_with_dedupe(&pool, &dedupe_key, "track-a", DedupeSource::Raw, || async {
+                duplicate_was_processed = true;
+                let _ = engine.process_passing(&split);
+                ActorDispatchOutcome::Processed
+            })
+            .await
+            .unwrap();
+        let snapshot_after_second = serde_json::to_value(engine.state_snapshot()).unwrap();
+
+        assert!(matches!(first, DedupedDispatchOutcome::Processed));
+        assert!(matches!(second, DedupedDispatchOutcome::Duplicate));
+        assert!(!duplicate_was_processed);
+        assert_eq!(snapshot_after_first, snapshot_after_second);
+    }
+
+    #[tokio::test]
+    async fn redelivered_control_intent_is_skipped_and_state_is_unchanged() {
+        let pool = test_pool().await;
+        let mut engine = test_engine();
+
+        engine.set_track(test_track_config());
+        engine.stage_moto(
+            "moto-2".to_string(),
+            "Open".to_string(),
+            "main".to_string(),
+            vec![test_staged_rider()],
+        );
+
+        let dedupe_key = "control:track-a:event-abc";
+        let first = dispatch_with_dedupe(
+            &pool,
+            dedupe_key,
+            "track-a",
+            DedupeSource::Control,
+            || async {
+                engine.reset();
+                ActorDispatchOutcome::Processed
+            },
+        )
+        .await
+        .unwrap();
+        let snapshot_after_first = serde_json::to_value(engine.state_snapshot()).unwrap();
+
+        let mut duplicate_was_processed = false;
+        let second = dispatch_with_dedupe(
+            &pool,
+            dedupe_key,
+            "track-a",
+            DedupeSource::Control,
+            || async {
+                duplicate_was_processed = true;
+                engine.reset();
+                ActorDispatchOutcome::Processed
+            },
+        )
+        .await
+        .unwrap();
+        let snapshot_after_second = serde_json::to_value(engine.state_snapshot()).unwrap();
+
+        assert!(matches!(first, DedupedDispatchOutcome::Processed));
+        assert!(matches!(second, DedupedDispatchOutcome::Duplicate));
+        assert!(!duplicate_was_processed);
+        assert_eq!(snapshot_after_first, snapshot_after_second);
+    }
+
+    #[tokio::test]
+    async fn failed_dispatch_releases_claim_for_retry() {
+        let pool = test_pool().await;
+        let key = "raw:track-a:client-a:boot-a:7";
+
+        let first = dispatch_with_dedupe(&pool, key, "track-a", DedupeSource::Raw, || async {
+            ActorDispatchOutcome::Failed
+        })
+        .await
+        .unwrap();
+
+        let second = dispatch_with_dedupe(&pool, key, "track-a", DedupeSource::Raw, || async {
+            ActorDispatchOutcome::Processed
+        })
+        .await
+        .unwrap();
+
+        assert!(matches!(first, DedupedDispatchOutcome::Failed));
+        assert!(matches!(second, DedupedDispatchOutcome::Processed));
+    }
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    fn test_engine() -> RaceEngine {
+        let (tx, _) = tokio::sync::broadcast::channel::<Arc<RaceEvent>>(64);
+        RaceEngine::new(tx)
+    }
+
+    fn test_track_config() -> TrackConfig {
+        TrackConfig {
+            track_id: "track-a".to_string(),
+            name: "Track A".to_string(),
+            gate_beacon_id: 9992,
+            loops: vec![
+                LoopConfig {
+                    loop_id: "start".to_string(),
+                    name: "Start".to_string(),
+                    decoder_id: "START".to_string(),
+                    position: 0,
+                    is_start: true,
+                    is_finish: false,
+                },
+                LoopConfig {
+                    loop_id: "split-1".to_string(),
+                    name: "Split 1".to_string(),
+                    decoder_id: "SPLIT".to_string(),
+                    position: 1,
+                    is_start: false,
+                    is_finish: false,
+                },
+                LoopConfig {
+                    loop_id: "finish".to_string(),
+                    name: "Finish".to_string(),
+                    decoder_id: "FINISH".to_string(),
+                    position: 2,
+                    is_start: false,
+                    is_finish: true,
+                },
+            ],
+        }
+    }
+
+    fn test_staged_rider() -> StagedRider {
+        StagedRider {
+            rider_id: "rider-1".to_string(),
+            first_name: "Riley".to_string(),
+            last_name: "Hart".to_string(),
+            plate_number: "11".to_string(),
+            transponder_id: 1001,
+            lane: 1,
+        }
+    }
+
+    fn test_passing(
+        passing_number: u32,
+        transponder_id: u32,
+        rtc_time_us: u64,
+        decoder_id: Option<&str>,
+    ) -> PassingMessage {
+        PassingMessage {
+            passing_number,
+            transponder_id,
+            rtc_time_us,
+            utc_time_us: None,
+            strength: Some(120),
+            hits: Some(18),
+            transponder_string: Some("FL-01001".to_string()),
+            flags: 0,
+            decoder_id: decoder_id.map(ToString::to_string),
+        }
     }
 }

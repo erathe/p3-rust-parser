@@ -59,10 +59,15 @@ services:
         "--role",
         "race-worker",
         "--nats-url",
-        "nats://nats:4222"
+        "nats://nats:4222",
+        "--db-path",
+        "/data/bmx-timing.db"
       ]
     depends_on:
       - nats
+      - p3-server
+    volumes:
+      - p3-server-data:/data
 
   frontend:
     build:

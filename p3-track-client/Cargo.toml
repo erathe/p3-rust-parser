@@ -16,6 +16,8 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true }
 uuid = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
 
 [[bin]]
 name = "p3-track-client"

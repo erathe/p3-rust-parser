@@ -56,7 +56,11 @@ async fn main() -> anyhow::Result<()> {
             db::run_migrations(&pool).await?;
             projection::run_projection_worker(&args.nats_url, &pool).await?
         }
-        RuntimeRole::RaceWorker => race::run_race_worker(&args.nats_url).await?,
+        RuntimeRole::RaceWorker => {
+            let pool = db::create_pool(&args.db_path).await?;
+            db::run_migrations(&pool).await?;
+            race::run_race_worker(&args.nats_url, &pool).await?
+        }
     }
 
     Ok(())

@@ -1,9 +1,14 @@
+mod spool;
+
+use anyhow::anyhow;
 use clap::Parser as ClapParser;
 use p3_contracts::{
     EventIdContext, TRACK_INGEST_CONTRACT_VERSION_V2, TrackIngestBatchRequest,
     TrackIngestBatchResponse, TrackIngestEvent, message_type_from_message,
 };
 use p3_parser::stream::MessageFramer;
+use spool::SpoolStore;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -45,9 +50,13 @@ struct Args {
     #[arg(long, default_value = "1000")]
     flush_interval_ms: u64,
 
-    /// Max in-memory unsent events before oldest events are dropped
+    /// Max locally spooled unsent events before oldest events are dropped
     #[arg(long, default_value = "5000")]
     max_buffer_events: usize,
+
+    /// Path to the local SQLite spool database
+    #[arg(long)]
+    spool_db_path: Option<String>,
 
     /// Reconnect delay to local decoder after disconnect/failure
     #[arg(long, default_value = "3")]
@@ -66,6 +75,13 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run(args: Args) -> anyhow::Result<()> {
+    if args.batch_size == 0 {
+        return Err(anyhow!("batch_size must be greater than 0"));
+    }
+    if args.flush_interval_ms == 0 {
+        return Err(anyhow!("flush_interval_ms must be greater than 0"));
+    }
+
     let ingest_url = format!(
         "{}/api/ingest/batch",
         args.central_base_url.trim_end_matches('/')
@@ -75,15 +91,30 @@ async fn run(args: Args) -> anyhow::Result<()> {
         .timeout(Duration::from_secs(args.http_timeout_secs))
         .build()?;
 
+    let spool_path = resolve_spool_db_path(&args);
+    let spool = SpoolStore::open(&spool_path).await?;
+    let mut queued_events = spool.len().await?;
+
+    info!(
+        spool_db_path = %spool_path.display(),
+        queued_events,
+        "Initialized local ingest spool",
+    );
+
     let boot_id = Uuid::new_v4().to_string();
     let mut next_seq: u64 = 1;
 
     loop {
+        if queued_events > 0 {
+            flush_spool_batch(&http, &ingest_url, &args, &spool, &mut queued_events).await?;
+        }
+
         info!(
             decoder_host = %args.decoder_host,
             decoder_port = args.decoder_port,
             track_id = %args.track_id,
             client_id = %args.client_id,
+            queued_events,
             "Connecting to local track decoder",
         );
 
@@ -92,7 +123,6 @@ async fn run(args: Args) -> anyhow::Result<()> {
                 info!("Connected to local decoder");
 
                 let mut framer = MessageFramer::new();
-                let mut pending: Vec<TrackIngestEvent> = Vec::with_capacity(args.batch_size.max(8));
                 let mut flush_tick = interval(Duration::from_millis(args.flush_interval_ms));
                 flush_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -116,7 +146,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
                             for framed in framer.feed(&chunk[..n]) {
                                 match framed {
                                     Ok(message) => {
-                                        pending.push(TrackIngestEvent {
+                                        let event = TrackIngestEvent {
                                             event_id: Uuid::new_v4(),
                                             track_id: args.track_id.clone(),
                                             event_id_context: EventIdContext {
@@ -128,11 +158,15 @@ async fn run(args: Args) -> anyhow::Result<()> {
                                             message_type: message_type_from_message(&message)
                                                 .to_string(),
                                             payload: message,
-                                        });
+                                        };
                                         next_seq = next_seq.saturating_add(1);
 
-                                        if pending.len() >= args.batch_size {
-                                            flush_batch(&http, &ingest_url, &args, &mut pending).await?;
+                                        spool.enqueue(&event).await?;
+                                        queued_events = queued_events.saturating_add(1);
+                                        trim_spool_if_needed(&args, &spool, &mut queued_events).await?;
+
+                                        if queued_events >= args.batch_size {
+                                            flush_spool_batch(&http, &ingest_url, &args, &spool, &mut queued_events).await?;
                                         }
                                     }
                                     Err(e) => {
@@ -142,21 +176,21 @@ async fn run(args: Args) -> anyhow::Result<()> {
                             }
                         }
                         _ = flush_tick.tick() => {
-                            if !pending.is_empty() {
-                                flush_batch(&http, &ingest_url, &args, &mut pending).await?;
+                            if queued_events > 0 {
+                                flush_spool_batch(&http, &ingest_url, &args, &spool, &mut queued_events).await?;
                             }
                         }
                     }
-
-                    trim_pending_if_needed(&args, &mut pending);
                 }
 
-                if !pending.is_empty() {
-                    flush_batch(&http, &ingest_url, &args, &mut pending).await?;
-                }
+                flush_spool_batch(&http, &ingest_url, &args, &spool, &mut queued_events).await?;
             }
             Err(e) => {
                 warn!(error = %e, "Failed to connect to local decoder");
+                if queued_events > 0 {
+                    flush_spool_batch(&http, &ingest_url, &args, &spool, &mut queued_events)
+                        .await?;
+                }
             }
         }
 
@@ -164,32 +198,57 @@ async fn run(args: Args) -> anyhow::Result<()> {
     }
 }
 
-fn trim_pending_if_needed(args: &Args, pending: &mut Vec<TrackIngestEvent>) {
-    if pending.len() <= args.max_buffer_events {
-        return;
-    }
-
-    let to_drop = pending.len() - args.max_buffer_events;
-    pending.drain(..to_drop);
-    warn!(
-        dropped_events = to_drop,
-        max_buffer_events = args.max_buffer_events,
-        "Dropped oldest unsent events due to backpressure",
-    );
-}
-
-async fn flush_batch(
-    http: &reqwest::Client,
-    ingest_url: &str,
+async fn trim_spool_if_needed(
     args: &Args,
-    pending: &mut Vec<TrackIngestEvent>,
+    spool: &SpoolStore,
+    queued_events: &mut usize,
 ) -> anyhow::Result<()> {
-    if pending.is_empty() {
+    if *queued_events <= args.max_buffer_events {
         return Ok(());
     }
 
-    let events = std::mem::take(pending);
+    let to_drop = *queued_events - args.max_buffer_events;
+    let dropped = spool.drop_oldest(to_drop).await?;
+    *queued_events = queued_events.saturating_sub(dropped);
+
+    warn!(
+        dropped_events = dropped,
+        max_buffer_events = args.max_buffer_events,
+        queued_events = *queued_events,
+        "Dropped oldest spooled events due to backpressure",
+    );
+
+    Ok(())
+}
+
+async fn flush_spool_batch(
+    http: &reqwest::Client,
+    ingest_url: &str,
+    args: &Args,
+    spool: &SpoolStore,
+    queued_events: &mut usize,
+) -> anyhow::Result<()> {
+    if *queued_events == 0 {
+        return Ok(());
+    }
+
+    let loaded = spool.load_batch(args.batch_size).await?;
+    if loaded.dropped_invalid > 0 {
+        *queued_events = queued_events.saturating_sub(loaded.dropped_invalid);
+        warn!(
+            dropped_invalid = loaded.dropped_invalid,
+            queued_events = *queued_events,
+            "Removed invalid rows from local ingest spool",
+        );
+    }
+    if loaded.rows.is_empty() {
+        return Ok(());
+    }
+
+    let ids: Vec<i64> = loaded.rows.iter().map(|row| row.id).collect();
+    let events: Vec<TrackIngestEvent> = loaded.rows.into_iter().map(|row| row.event).collect();
     let event_count = events.len();
+
     let request = TrackIngestBatchRequest {
         contract_version: TRACK_INGEST_CONTRACT_VERSION_V2.to_string(),
         track_id: args.track_id.clone(),
@@ -217,29 +276,69 @@ async fn flush_batch(
                     );
                 }
             }
+
+            let deleted = spool.ack_batch(&ids).await?;
+            *queued_events = queued_events.saturating_sub(deleted);
+            if deleted != event_count {
+                warn!(
+                    expected = event_count,
+                    deleted, "Spool ack removed fewer rows than expected; resyncing queue depth",
+                );
+                *queued_events = spool.len().await?;
+            }
+
             Ok(())
         }
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            *pending = request.events;
             error!(
                 status = %status,
                 body = %body,
-                queued_events = pending.len(),
+                queued_events = *queued_events,
                 "Central server rejected ingest batch",
             );
             Ok(())
         }
         Err(e) => {
-            *pending = request.events;
             warn!(
                 error = %e,
-                queued_events = pending.len(),
+                queued_events = *queued_events,
                 "Failed to send batch to central server",
             );
             Ok(())
         }
+    }
+}
+
+fn resolve_spool_db_path(args: &Args) -> PathBuf {
+    if let Some(path) = &args.spool_db_path {
+        return PathBuf::from(path);
+    }
+
+    PathBuf::from(format!(
+        "track-ingest-spool-{}-{}.db",
+        sanitize_for_filename(&args.track_id),
+        sanitize_for_filename(&args.client_id)
+    ))
+}
+
+fn sanitize_for_filename(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        "default".to_string()
+    } else {
+        sanitized
     }
 }
 
