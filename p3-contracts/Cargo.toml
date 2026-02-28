@@ -1,0 +1,12 @@
+[package]
+name = "p3-contracts"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eirik Rathe"]
+description = "Shared API contracts for P3 BMX timing components"
+license = "CC-BY-NC-4.0"
+
+[dependencies]
+p3-parser = { path = "../p3-parser" }
+serde = { workspace = true }
+uuid = { workspace = true }

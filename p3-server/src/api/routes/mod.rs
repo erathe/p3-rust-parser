@@ -1,5 +1,6 @@
 pub mod dev_ingest;
 pub mod events;
+pub mod ingest;
 pub mod motos;
 pub mod onboarding;
 pub mod race;

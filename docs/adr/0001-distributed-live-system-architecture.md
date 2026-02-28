@@ -37,6 +37,8 @@ The current architecture is suitable for development and local workflows but not
 
 Adopt an event-driven architecture centered on **NATS JetStream** as the durable transport between ingest and processing.
 
+For field use, the stream pipeline is the sole live-data source of truth. Direct local decoder -> in-process race engine authority in the central runtime is development-only and must be removed before production multi-track operation.
+
 ### Summary of the chosen target system
 
 1. Track-side clients publish decoded timing events to a central ingest API.
@@ -65,7 +67,7 @@ Adopt an event-driven architecture centered on **NATS JetStream** as the durable
    - Reads local decoder stream.
    - Adds envelope metadata (`track_id`, `client_id`, `boot_id`, `seq`, timestamps).
    - Retries safely with idempotency key.
-   - Optional local disk spool for WAN outages.
+   - Local disk spool is REQUIRED for unreliable WAN and field operation; gateway must buffer and drain while preserving idempotency keys and per-track order.
 
 2. **Central Ingest API (`p3-server`, new `/api/ingest/batch`)**
    - Authenticates client.
@@ -157,6 +159,10 @@ Each track has an isolated race engine context:
 
 Race control commands (`stage`, `reset`, `force-finish`) are persisted as intents and routed to the corresponding actor, then emitted as events for projections.
 
+For field use, per-track actor isolation and idempotent consumers are mandatory invariants. No consumer path may assume exactly-once delivery.
+
+Race control is intent-first: every operator action must be published as an intent and remain audit-loggable before it affects derived race state.
+
 ## WebSocket Subscription Contract
 
 Endpoint:
@@ -186,6 +192,8 @@ Behavior:
 - Then stream incremental events.
 - Send heartbeat every N seconds.
 - On lag/failure: send error with reconnect strategy.
+
+For field use, `/ws/v1/live` scoped subscriptions with snapshot + incremental delivery are mandatory; unscoped/global live feeds are not permitted.
 
 ## Retention Policy
 
@@ -290,6 +298,36 @@ Phase 4:
 2. Make stream pipeline the sole source of truth for live data.
 3. Harden SLO dashboards and alerting.
 
+## Hardening Addendum (2026-02-28)
+
+Before the first real multi-track event, the following are mandatory:
+
+1. Stream pipeline is the sole live-data source of truth; direct local engine authority in central runtime is removed.
+2. Per-track actor isolation is enforced, and all ingest/processing/projection consumers are idempotent.
+3. Race control is intent-first with publish + auditability for all operator actions.
+4. `/ws/v1/live` supports only scoped subscriptions and always serves snapshot + incremental updates.
+5. Deterministic replay test passes for representative track streams and reproduces identical derived outcomes.
+6. 3+ concurrent-track isolation test passes with no cross-track event leakage.
+
+These constraints harden durability and isolation for field use without introducing unnecessary distributed-system complexity in MVP.
+
+## Explicitly Deferred (Post-MVP Hardening)
+
+The following are intentionally deferred to avoid overengineering before first field deployment:
+
+- Edge NATS at track sites.
+- Multi-region active-active topology.
+- Direct track-client -> JetStream bypass of ingest API.
+- Exactly-once transport guarantees (application-level idempotency remains the strategy).
+
+## Release Gates
+
+Go/no-go criteria for first real multi-track event:
+
+- Latency: p95 capture-to-`/ws/v1/live` visibility < 500 ms under representative 3+ track load.
+- Isolation: zero cross-track leakage in websocket delivery and derived projections during 3+ concurrent-track runs.
+- Replay determinism: replay of recorded raw ingest reproduces identical derived race outcomes for the same input window.
+
 ## Alternatives Considered
 
 1. Keep direct HTTP ingest -> in-process race engine
@@ -330,4 +368,3 @@ The architecture is considered implemented when:
 3. Websocket clients can subscribe by track and receive only scoped events.
 4. Ingest retries do not create duplicate race outcomes.
 5. End-to-end latency SLO is met in representative load tests.
-

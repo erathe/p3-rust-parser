@@ -90,8 +90,7 @@ impl RaceEngine {
     pub fn set_track(&mut self, config: TrackConfig) {
         self.decoder_to_loop.clear();
         for l in &config.loops {
-            self.decoder_to_loop
-                .insert(l.decoder_id.clone(), l.clone());
+            self.decoder_to_loop.insert(l.decoder_id.clone(), l.clone());
         }
         info!(track = %config.name, loops = config.loops.len(), "Track config loaded");
         self.track_config = Some(config);
@@ -226,8 +225,7 @@ impl RaceEngine {
                 {
                     let loop_config = loop_config.clone();
 
-                    if let Some(rider) =
-                        self.riders_by_transponder.get_mut(&passing.transponder_id)
+                    if let Some(rider) = self.riders_by_transponder.get_mut(&passing.transponder_id)
                     {
                         let elapsed_us = passing.rtc_time_us.saturating_sub(gate_drop_time_us);
 
@@ -243,9 +241,7 @@ impl RaceEngine {
                         }
 
                         // Record the split
-                        rider
-                            .splits
-                            .insert(loop_config.loop_id.clone(), elapsed_us);
+                        rider.splits.insert(loop_config.loop_id.clone(), elapsed_us);
                         rider.last_loop_position = Some(loop_config.position);
                         rider.last_loop_name = Some(loop_config.name.clone());
                         rider.last_elapsed_us = Some(elapsed_us);
@@ -294,8 +290,11 @@ impl RaceEngine {
                             self.broadcast(finish_event);
                         } else if !rider.finished {
                             // Split time at a non-finish loop
-                            let position =
-                                processor::calculate_position_at_loop(&self.riders_by_transponder, &loop_config, &rider_id);
+                            let position = processor::calculate_position_at_loop(
+                                &self.riders_by_transponder,
+                                &loop_config,
+                                &rider_id,
+                            );
 
                             // Gap to leader at this loop
                             let leader_time = processor::leader_time_at_loop(
@@ -342,10 +341,7 @@ impl RaceEngine {
                                 round_type,
                             };
 
-                            let finish_event = RaceEvent::RaceFinished {
-                                moto_id,
-                                results,
-                            };
+                            let finish_event = RaceEvent::RaceFinished { moto_id, results };
                             events.push(finish_event.clone());
                             self.broadcast(finish_event);
                         }
@@ -388,10 +384,7 @@ impl RaceEngine {
                     round_type,
                 };
 
-                let event = RaceEvent::RaceFinished {
-                    moto_id,
-                    results,
-                };
+                let event = RaceEvent::RaceFinished { moto_id, results };
                 self.broadcast(event.clone());
                 Some(event)
             }
@@ -583,12 +576,10 @@ impl RaceEngine {
             .collect();
 
         // Finished riders first (by position), then DNF riders
-        results.sort_by(|a, b| {
-            match (a.dnf, b.dnf) {
-                (false, true) => std::cmp::Ordering::Less,
-                (true, false) => std::cmp::Ordering::Greater,
-                _ => a.position.cmp(&b.position),
-            }
+        results.sort_by(|a, b| match (a.dnf, b.dnf) {
+            (false, true) => std::cmp::Ordering::Less,
+            (true, false) => std::cmp::Ordering::Greater,
+            _ => a.position.cmp(&b.position),
         });
 
         results
@@ -751,13 +742,25 @@ mod tests {
         let p1 = make_passing(1002, "D0000C01", 11_000_000);
         let events = engine.process_passing(&p1);
         // Should get SplitTime + PositionsUpdate
-        assert!(events.iter().any(|e| matches!(e, RaceEvent::SplitTime { rider_id, .. } if rider_id == "rider-2")));
-        assert!(events.iter().any(|e| matches!(e, RaceEvent::PositionsUpdate { .. })));
+        assert!(
+            events.iter().any(
+                |e| matches!(e, RaceEvent::SplitTime { rider_id, .. } if rider_id == "rider-2")
+            )
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RaceEvent::PositionsUpdate { .. }))
+        );
 
         // Rider 1 crosses start hill second (T+1.2s)
         let p2 = make_passing(1001, "D0000C01", 11_200_000);
         let events = engine.process_passing(&p2);
-        assert!(events.iter().any(|e| matches!(e, RaceEvent::SplitTime { rider_id, .. } if rider_id == "rider-1")));
+        assert!(
+            events.iter().any(
+                |e| matches!(e, RaceEvent::SplitTime { rider_id, .. } if rider_id == "rider-1")
+            )
+        );
     }
 
     #[test]
@@ -780,19 +783,35 @@ mod tests {
         engine.process_passing(&make_passing(1001, "D0000C01", 11_000_000)); // start
         engine.process_passing(&make_passing(1001, "D0000C02", 15_000_000)); // corner
         let events = engine.process_passing(&make_passing(1001, "D0000C03", 20_000_000)); // finish
-        assert!(events.iter().any(|e| matches!(e, RaceEvent::RiderFinished { finish_position: 1, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            RaceEvent::RiderFinished {
+                finish_position: 1,
+                ..
+            }
+        )));
 
         // Rider 2 finishes second
         engine.process_passing(&make_passing(1002, "D0000C01", 11_200_000));
         engine.process_passing(&make_passing(1002, "D0000C02", 15_500_000));
         let events = engine.process_passing(&make_passing(1002, "D0000C03", 21_000_000));
-        assert!(events.iter().any(|e| matches!(e, RaceEvent::RiderFinished { finish_position: 2, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            RaceEvent::RiderFinished {
+                finish_position: 2,
+                ..
+            }
+        )));
 
         // Rider 3 finishes third → triggers RaceFinished
         engine.process_passing(&make_passing(1003, "D0000C01", 11_500_000));
         engine.process_passing(&make_passing(1003, "D0000C02", 16_000_000));
         let events = engine.process_passing(&make_passing(1003, "D0000C03", 22_000_000));
-        assert!(events.iter().any(|e| matches!(e, RaceEvent::RaceFinished { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RaceEvent::RaceFinished { .. }))
+        );
         assert!(matches!(engine.phase(), RacePhase::Finished { .. }));
     }
 

@@ -43,14 +43,14 @@ struct SimRider {
 
 fn make_riders(count: usize) -> Vec<SimRider> {
     let rider_data: Vec<(u32, &[u8; 8], f64)> = vec![
-        (1001, b"FL-01001", 0.95),  // fast rider
-        (1002, b"FL-01002", 1.00),  // average
-        (1003, b"FL-01003", 1.03),  // slightly slower
-        (1004, b"FL-01004", 0.98),  // above average
-        (1005, b"FL-01005", 1.05),  // slower
-        (1006, b"FL-01006", 1.01),  // average
-        (1007, b"FL-01007", 0.97),  // above average
-        (1008, b"FL-01008", 1.08),  // slowest
+        (1001, b"FL-01001", 0.95), // fast rider
+        (1002, b"FL-01002", 1.00), // average
+        (1003, b"FL-01003", 1.03), // slightly slower
+        (1004, b"FL-01004", 0.98), // above average
+        (1005, b"FL-01005", 1.05), // slower
+        (1006, b"FL-01006", 1.01), // average
+        (1007, b"FL-01007", 0.97), // above average
+        (1008, b"FL-01008", 1.08), // slowest
     ];
 
     rider_data

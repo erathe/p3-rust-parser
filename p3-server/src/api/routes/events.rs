@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 use serde::{Deserialize, Serialize};
 
@@ -77,16 +77,11 @@ pub async fn get(
         let rider_ids = queries::list_class_rider_ids(&state.db, &class.id).await?;
         let mut riders = Vec::new();
         for rid in &rider_ids {
-            if let Some(rider) =
-                crate::db::queries::riders::get_rider(&state.db, rid).await?
-            {
+            if let Some(rider) = crate::db::queries::riders::get_rider(&state.db, rid).await? {
                 riders.push(rider);
             }
         }
-        classes_with_riders.push(ClassWithRiders {
-            class,
-            riders,
-        });
+        classes_with_riders.push(ClassWithRiders { class, riders });
     }
 
     Ok(Json(EventWithClasses {
@@ -100,8 +95,7 @@ pub async fn create(
     Json(req): Json<CreateEventRequest>,
 ) -> Result<Json<EventRow>, ApiError> {
     let id = uuid::Uuid::new_v4().to_string();
-    let event = queries::create_event(&state.db, &id, &req.name, &req.date, &req.track_id)
-        .await?;
+    let event = queries::create_event(&state.db, &id, &req.name, &req.date, &req.track_id).await?;
     Ok(Json(event))
 }
 

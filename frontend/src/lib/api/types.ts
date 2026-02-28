@@ -187,6 +187,74 @@ export interface VersionMessage {
 
 export type P3Message = PassingMessage | StatusMessage | VersionMessage;
 
+export type LiveEnvelopeKind = 'snapshot' | 'event' | 'heartbeat' | 'error';
+
+export type LiveChannel = 'decoder' | 'race' | 'unknown';
+
+export interface LiveEnvelopeBase {
+	kind: LiveEnvelopeKind;
+	channel: LiveChannel;
+	track_id: string;
+	event_id: string | null;
+	seq: number;
+	ts_us: number;
+}
+
+export interface DecoderStatusRow {
+	loop_id: string;
+	loop_name: string;
+	loop_position: number;
+	decoder_id: string;
+	noise: number | null;
+	temperature: number | null;
+	gps_status: number | null;
+	satellites: number | null;
+	last_seen: string | null;
+}
+
+export interface DecoderSnapshotPayload {
+	rows: DecoderStatusRow[];
+}
+
+export interface DecoderEventPayload {
+	message: P3Message;
+	source_event_id: string;
+}
+
+export interface LiveErrorPayload {
+	code: string;
+	message: string;
+	channel: string | null;
+}
+
+export interface DecoderSnapshotEnvelope extends LiveEnvelopeBase {
+	kind: 'snapshot';
+	channel: 'decoder';
+	payload: DecoderSnapshotPayload;
+}
+
+export interface DecoderEventEnvelope extends LiveEnvelopeBase {
+	kind: 'event';
+	channel: 'decoder';
+	payload: DecoderEventPayload;
+}
+
+export interface DecoderHeartbeatEnvelope extends LiveEnvelopeBase {
+	kind: 'heartbeat';
+	payload: Record<string, never>;
+}
+
+export interface DecoderErrorEnvelope extends LiveEnvelopeBase {
+	kind: 'error';
+	payload: LiveErrorPayload;
+}
+
+export type DecoderLiveEnvelope =
+	| DecoderSnapshotEnvelope
+	| DecoderEventEnvelope
+	| DecoderHeartbeatEnvelope
+	| DecoderErrorEnvelope;
+
 // --- WebSocket Race Event types ---
 
 export interface StagedRider {

@@ -6,24 +6,20 @@ pub async fn list_motos_for_event(
     pool: &SqlitePool,
     event_id: &str,
 ) -> Result<Vec<MotoRow>, sqlx::Error> {
-    sqlx::query_as::<_, MotoRow>(
-        "SELECT * FROM motos WHERE event_id = ? ORDER BY sequence",
-    )
-    .bind(event_id)
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, MotoRow>("SELECT * FROM motos WHERE event_id = ? ORDER BY sequence")
+        .bind(event_id)
+        .fetch_all(pool)
+        .await
 }
 
 pub async fn list_motos_for_class(
     pool: &SqlitePool,
     class_id: &str,
 ) -> Result<Vec<MotoRow>, sqlx::Error> {
-    sqlx::query_as::<_, MotoRow>(
-        "SELECT * FROM motos WHERE class_id = ? ORDER BY sequence",
-    )
-    .bind(class_id)
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, MotoRow>("SELECT * FROM motos WHERE class_id = ? ORDER BY sequence")
+        .bind(class_id)
+        .fetch_all(pool)
+        .await
 }
 
 pub async fn get_moto(pool: &SqlitePool, id: &str) -> Result<Option<MotoRow>, sqlx::Error> {
@@ -72,12 +68,10 @@ pub async fn list_entries(
     pool: &SqlitePool,
     moto_id: &str,
 ) -> Result<Vec<MotoEntryRow>, sqlx::Error> {
-    sqlx::query_as::<_, MotoEntryRow>(
-        "SELECT * FROM moto_entries WHERE moto_id = ? ORDER BY lane",
-    )
-    .bind(moto_id)
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, MotoEntryRow>("SELECT * FROM moto_entries WHERE moto_id = ? ORDER BY lane")
+        .bind(moto_id)
+        .fetch_all(pool)
+        .await
 }
 
 pub async fn create_entry(
@@ -87,15 +81,13 @@ pub async fn create_entry(
     rider_id: &str,
     lane: i64,
 ) -> Result<MotoEntryRow, sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO moto_entries (id, moto_id, rider_id, lane) VALUES (?, ?, ?, ?)",
-    )
-    .bind(id)
-    .bind(moto_id)
-    .bind(rider_id)
-    .bind(lane)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO moto_entries (id, moto_id, rider_id, lane) VALUES (?, ?, ?, ?)")
+        .bind(id)
+        .bind(moto_id)
+        .bind(rider_id)
+        .bind(lane)
+        .execute(pool)
+        .await?;
 
     sqlx::query_as::<_, MotoEntryRow>("SELECT * FROM moto_entries WHERE id = ?")
         .bind(id)

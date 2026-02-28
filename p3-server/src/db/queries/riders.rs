@@ -3,10 +3,7 @@ use uuid::Uuid;
 
 use crate::db::models::RiderRow;
 
-pub async fn list_riders(
-    pool: &SqlitePool,
-    search: Option<&str>,
-) -> sqlx::Result<Vec<RiderRow>> {
+pub async fn list_riders(pool: &SqlitePool, search: Option<&str>) -> sqlx::Result<Vec<RiderRow>> {
     match search {
         Some(term) => {
             let pattern = format!("%{}%", term);
@@ -21,11 +18,9 @@ pub async fn list_riders(
             .await
         }
         None => {
-            sqlx::query_as::<_, RiderRow>(
-                "SELECT * FROM riders ORDER BY last_name, first_name",
-            )
-            .fetch_all(pool)
-            .await
+            sqlx::query_as::<_, RiderRow>("SELECT * FROM riders ORDER BY last_name, first_name")
+                .fetch_all(pool)
+                .await
         }
     }
 }
@@ -70,7 +65,11 @@ pub async fn create_rider(pool: &SqlitePool, input: CreateRider) -> sqlx::Result
     get_rider(pool, &id).await.map(|r| r.unwrap())
 }
 
-pub async fn update_rider(pool: &SqlitePool, id: &str, input: CreateRider) -> sqlx::Result<Option<RiderRow>> {
+pub async fn update_rider(
+    pool: &SqlitePool,
+    id: &str,
+    input: CreateRider,
+) -> sqlx::Result<Option<RiderRow>> {
     let result = sqlx::query(
         "UPDATE riders SET first_name = ?, last_name = ?, plate_number = ?, transponder_id = ?, transponder_string = ?, age_group = ?, skill_level = ?, gender = ?, equipment = ?, updated_at = datetime('now') WHERE id = ?",
     )

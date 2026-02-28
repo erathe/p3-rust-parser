@@ -491,7 +491,12 @@ pub fn build_gate_passing_with_escape(
     // This specific timestamp produces an escape sequence when encoded
     // It's based on real data: 1762286699916839 microseconds since epoch
     let rtc_time_with_escape: u64 = 1762286699916839;
-    build_gate_passing(passing_number, transponder, rtc_time_with_escape, decoder_id)
+    build_gate_passing(
+        passing_number,
+        transponder,
+        rtc_time_with_escape,
+        decoder_id,
+    )
 }
 
 #[cfg(test)]
@@ -516,8 +521,16 @@ mod tests {
     #[test]
     fn test_build_passing_rider() {
         let string = b"FL-94890";
-        let message =
-            build_rider_passing(8841, 102758186, string, 0x0006426530063546, 127, 33, 0x000C00D0).unwrap();
+        let message = build_rider_passing(
+            8841,
+            102758186,
+            string,
+            0x0006426530063546,
+            127,
+            33,
+            0x000C00D0,
+        )
+        .unwrap();
 
         // Should start with SOR and end with EOR
         assert_eq!(message[0], SOR);
@@ -593,7 +606,8 @@ mod tests {
     #[test]
     fn test_build_rider_passing_now() {
         let string = b"FL-94890";
-        let message = build_rider_passing_now(8841, 102758186, string, 127, 33, 0x000C00D0).unwrap();
+        let message =
+            build_rider_passing_now(8841, 102758186, string, 127, 33, 0x000C00D0).unwrap();
 
         // Should start with SOR and end with EOR
         assert_eq!(message[0], SOR);

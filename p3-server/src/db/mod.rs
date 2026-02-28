@@ -26,6 +26,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         include_str!("../../migrations/001_initial_schema.sql"),
         include_str!("../../migrations/002_track_sections.sql"),
         include_str!("../../migrations/003_dev_ingest.sql"),
+        include_str!("../../migrations/004_projection_dedupe.sql"),
     ];
 
     for migration_sql in &migrations {

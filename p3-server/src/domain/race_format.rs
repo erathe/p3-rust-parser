@@ -110,10 +110,7 @@ pub fn generate_qualifying_motos(rider_ids: &[String]) -> Vec<MotoAssignment> {
 
 /// Generate elimination round motos (semis, quarters, main).
 /// These are empty shells — riders are assigned after qualifying results.
-pub fn generate_elimination_motos(
-    format: &RaceFormat,
-    start_sequence: i64,
-) -> Vec<MotoAssignment> {
+pub fn generate_elimination_motos(format: &RaceFormat, start_sequence: i64) -> Vec<MotoAssignment> {
     let mut motos = Vec::new();
     let mut seq = start_sequence;
 
@@ -241,9 +238,24 @@ mod tests {
         let motos = generate_qualifying_motos(&riders);
 
         // Get rider-1's lane in each round
-        let lane_r1_m1 = motos[0].entries.iter().find(|(id, _)| id == "rider-1").unwrap().1;
-        let lane_r1_m2 = motos[1].entries.iter().find(|(id, _)| id == "rider-1").unwrap().1;
-        let lane_r1_m3 = motos[2].entries.iter().find(|(id, _)| id == "rider-1").unwrap().1;
+        let lane_r1_m1 = motos[0]
+            .entries
+            .iter()
+            .find(|(id, _)| id == "rider-1")
+            .unwrap()
+            .1;
+        let lane_r1_m2 = motos[1]
+            .entries
+            .iter()
+            .find(|(id, _)| id == "rider-1")
+            .unwrap()
+            .1;
+        let lane_r1_m3 = motos[2]
+            .entries
+            .iter()
+            .find(|(id, _)| id == "rider-1")
+            .unwrap()
+            .1;
 
         // Lanes should be different across rounds
         assert_ne!(lane_r1_m1, lane_r1_m2);
@@ -292,7 +304,10 @@ mod tests {
             .collect();
 
         for window in all_sequences.windows(2) {
-            assert!(window[1] > window[0], "Sequences must be strictly increasing");
+            assert!(
+                window[1] > window[0],
+                "Sequences must be strictly increasing"
+            );
         }
     }
 }

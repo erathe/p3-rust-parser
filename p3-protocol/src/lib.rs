@@ -36,14 +36,16 @@
 //! assert_eq!(passing::TRANSPONDER, 0x03);
 //! ```
 
-pub mod types;
-pub mod fields;
-pub mod escape;
 pub mod crc;
 pub mod error;
+pub mod escape;
+pub mod fields;
+pub mod types;
 
 // Re-export commonly used items at crate root
-pub use types::*;
-pub use escape::{escape_data, unescape_data, EscapeInfo, encode, escaped_length, unescaped_length};
 pub use crc::{calculate_crc, calculate_message_crc, validate_crc};
 pub use error::*;
+pub use escape::{
+    EscapeInfo, encode, escape_data, escaped_length, unescape_data, unescaped_length,
+};
+pub use types::*;

@@ -1,0 +1,170 @@
+services:
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+
+  p3-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command:
+      [
+        "p3-server",
+        "--no-decoder",
+        "--port",
+        "3001",
+        "--nats-url",
+        "nats://nats:4222",
+        "--db-path",
+        "/data/bmx-timing.db"
+      ]
+    depends_on:
+      - nats
+    ports:
+      - "3001:3001"
+    volumes:
+      - p3-server-data:/data
+
+  projection-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command:
+      [
+        "p3-server",
+        "--role",
+        "projection-worker",
+        "--nats-url",
+        "nats://nats:4222",
+        "--db-path",
+        "/data/bmx-timing.db"
+      ]
+    depends_on:
+      - nats
+      - p3-server
+    volumes:
+      - p3-server-data:/data
+
+  race-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command:
+      [
+        "p3-server",
+        "--role",
+        "race-worker",
+        "--nats-url",
+        "nats://nats:4222"
+      ]
+    depends_on:
+      - nats
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      VITE_API_PROXY_TARGET: http://p3-server:3001
+      VITE_WS_PROXY_TARGET: ws://p3-server:3001
+    depends_on:
+      - p3-server
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+
+  track-a-decoder:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command: ["test-server", "--scenario", "full-race", "--riders", "6", "--port", "5403"]
+
+  track-a-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command:
+      [
+        "p3-track-client",
+        "--client-id",
+        "track-a-client-1",
+        "--track-id",
+        "track-a",
+        "--decoder-host",
+        "track-a-decoder",
+        "--decoder-port",
+        "5403",
+        "--central-base-url",
+        "http://p3-server:3001"
+      ]
+    depends_on:
+      - p3-server
+      - track-a-decoder
+
+  track-b-decoder:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command: ["test-server", "--scenario", "full-race", "--riders", "6", "--port", "5403"]
+
+  track-b-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command:
+      [
+        "p3-track-client",
+        "--client-id",
+        "track-b-client-1",
+        "--track-id",
+        "track-b",
+        "--decoder-host",
+        "track-b-decoder",
+        "--decoder-port",
+        "5403",
+        "--central-base-url",
+        "http://p3-server:3001"
+      ]
+    depends_on:
+      - p3-server
+      - track-b-decoder
+
+  track-c-decoder:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command: ["test-server", "--scenario", "full-race", "--riders", "6", "--port", "5403"]
+
+  track-c-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-workspace
+    command:
+      [
+        "p3-track-client",
+        "--client-id",
+        "track-c-client-1",
+        "--track-id",
+        "track-c",
+        "--decoder-host",
+        "track-c-decoder",
+        "--decoder-port",
+        "5403",
+        "--central-base-url",
+        "http://p3-server:3001"
+      ]
+    depends_on:
+      - p3-server
+      - track-c-decoder
+
+volumes:
+  nats-data:
+  p3-server-data:
+  frontend-node-modules:

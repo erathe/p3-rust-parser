@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 use serde::Serialize;
 
@@ -62,10 +62,7 @@ pub async fn get(
     let mut entries_with_riders = Vec::new();
     for entry in entries {
         let rider = crate::db::queries::riders::get_rider(&state.db, &entry.rider_id).await?;
-        entries_with_riders.push(EntryWithRider {
-            entry,
-            rider,
-        });
+        entries_with_riders.push(EntryWithRider { entry, rider });
     }
 
     Ok(Json(MotoWithEntries {
@@ -88,7 +85,9 @@ pub async fn generate(
         .ok_or_else(|| ApiError::NotFound("Class not found".into()))?;
 
     if class.event_id != event_id {
-        return Err(ApiError::BadRequest("Class does not belong to this event".into()));
+        return Err(ApiError::BadRequest(
+            "Class does not belong to this event".into(),
+        ));
     }
 
     // Get riders in this class
@@ -126,8 +125,7 @@ pub async fn generate(
 
         for (rider_id, lane) in &assignment.entries {
             let entry_id = uuid::Uuid::new_v4().to_string();
-            moto_queries::create_entry(&state.db, &entry_id, &moto_id, rider_id, *lane)
-                .await?;
+            moto_queries::create_entry(&state.db, &entry_id, &moto_id, rider_id, *lane).await?;
         }
     }
 

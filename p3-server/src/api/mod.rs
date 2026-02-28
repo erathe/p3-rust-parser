@@ -15,6 +15,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         // WebSocket
         .route("/ws", get(ws::ws_handler))
+        .route("/ws/v1/live", get(ws::ws_live_handler))
         // Tracks
         .route(
             "/api/tracks",
@@ -108,6 +109,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/race/force-finish", post(routes::race::force_finish))
         // Seed demo data
         .route("/api/seed-demo", post(routes::seed::seed_demo))
+        // Track ingest v2
+        .route("/api/ingest/batch", post(routes::ingest::ingest_batch))
         // Dev ingest + replay
         .route(
             "/api/dev/ingest/batch",

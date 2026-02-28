@@ -11,7 +11,8 @@ use crate::domain::race_event::{LoopConfig, RiderState, TrackConfig};
 /// 1. The transponder ID matching the track's configured gate beacon ID, OR
 /// 2. The transponder ID being any reserved system ID (9991, 9992, 9995)
 pub fn is_gate_drop(passing: &PassingMessage, track: &TrackConfig) -> bool {
-    passing.transponder_id == track.gate_beacon_id || reserved_ids::is_reserved(passing.transponder_id)
+    passing.transponder_id == track.gate_beacon_id
+        || reserved_ids::is_reserved(passing.transponder_id)
 }
 
 /// Calculate a rider's position at a specific loop.

@@ -32,9 +32,7 @@ pub async fn create_event(
         .execute(pool)
         .await?;
 
-    get_event(pool, id)
-        .await?
-        .ok_or(sqlx::Error::RowNotFound)
+    get_event(pool, id).await?.ok_or(sqlx::Error::RowNotFound)
 }
 
 pub async fn update_event(
@@ -52,9 +50,7 @@ pub async fn update_event(
         .execute(pool)
         .await?;
 
-    get_event(pool, id)
-        .await?
-        .ok_or(sqlx::Error::RowNotFound)
+    get_event(pool, id).await?.ok_or(sqlx::Error::RowNotFound)
 }
 
 pub async fn delete_event(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
@@ -79,10 +75,7 @@ pub async fn list_classes(
     .await
 }
 
-pub async fn get_class(
-    pool: &SqlitePool,
-    id: &str,
-) -> Result<Option<EventClassRow>, sqlx::Error> {
+pub async fn get_class(pool: &SqlitePool, id: &str) -> Result<Option<EventClassRow>, sqlx::Error> {
     sqlx::query_as::<_, EventClassRow>("SELECT * FROM event_classes WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)

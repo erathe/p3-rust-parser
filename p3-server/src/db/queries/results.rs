@@ -35,7 +35,11 @@ pub async fn persist_results(
              dns = ? \
              WHERE moto_id = ? AND rider_id = ?",
         )
-        .bind(if result.dnf { None } else { Some(result.position as i64) })
+        .bind(if result.dnf {
+            None
+        } else {
+            Some(result.position as i64)
+        })
         .bind(result.elapsed_us.map(|us| us as i64))
         .bind(points)
         .bind(result.dnf)
@@ -76,15 +80,18 @@ pub async fn get_class_standings(
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|r| RiderStanding {
-        rider_id: r.rider_id,
-        first_name: r.first_name,
-        last_name: r.last_name,
-        plate_number: r.plate_number,
-        total_points: r.total_points,
-        motos_completed: r.motos_completed,
-        dnf_count: r.dnf_count,
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| RiderStanding {
+            rider_id: r.rider_id,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            plate_number: r.plate_number,
+            total_points: r.total_points,
+            motos_completed: r.motos_completed,
+            dnf_count: r.dnf_count,
+        })
+        .collect())
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

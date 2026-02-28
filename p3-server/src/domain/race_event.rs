@@ -17,10 +17,7 @@ pub enum RaceEvent {
 
     /// Gate has dropped — race clock starts
     #[serde(rename = "gate_drop")]
-    GateDrop {
-        moto_id: String,
-        timestamp_us: u64,
-    },
+    GateDrop { moto_id: String, timestamp_us: u64 },
 
     /// A rider crossed a timing loop (split or finish)
     #[serde(rename = "split_time")]

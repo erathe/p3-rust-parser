@@ -1,13 +1,15 @@
 use clap::Parser as ClapParser;
-use p3_parser::{Message, stream::MessageFramer};
-use serde::{Deserialize, Serialize};
+use p3_contracts::{
+    EventIdContext, TRACK_INGEST_CONTRACT_VERSION_V2, TrackIngestBatchRequest,
+    TrackIngestBatchResponse, TrackIngestEvent, message_type_from_message,
+};
+use p3_parser::stream::MessageFramer;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
 use tracing::{error, info, warn};
-
-const CONTRACT_VERSION: &str = "track_ingest.v1";
+use uuid::Uuid;
 
 #[derive(ClapParser, Debug)]
 #[command(
@@ -22,10 +24,6 @@ struct Args {
     /// Track ID this client belongs to
     #[arg(long)]
     track_id: String,
-
-    /// Dev/test session ID used for grouping and replay
-    #[arg(long, default_value = "dev-default")]
-    session_id: String,
 
     /// Local decoder hostname/IP (physically at the track)
     #[arg(long, default_value = "localhost")]
@@ -60,28 +58,6 @@ struct Args {
     http_timeout_secs: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct IngestEvent {
-    seq: u64,
-    captured_at_us: u64,
-    message: Message,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct IngestBatchRequest {
-    contract_version: String,
-    session_id: String,
-    track_id: String,
-    client_id: String,
-    events: Vec<IngestEvent>,
-}
-
-#[derive(Debug, Deserialize)]
-struct IngestBatchResponse {
-    accepted: usize,
-    duplicates: usize,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_target(false).init();
@@ -91,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run(args: Args) -> anyhow::Result<()> {
     let ingest_url = format!(
-        "{}/api/dev/ingest/batch",
+        "{}/api/ingest/batch",
         args.central_base_url.trim_end_matches('/')
     );
 
@@ -99,6 +75,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         .timeout(Duration::from_secs(args.http_timeout_secs))
         .build()?;
 
+    let boot_id = Uuid::new_v4().to_string();
     let mut next_seq: u64 = 1;
 
     loop {
@@ -115,7 +92,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
                 info!("Connected to local decoder");
 
                 let mut framer = MessageFramer::new();
-                let mut pending: Vec<IngestEvent> = Vec::with_capacity(args.batch_size.max(8));
+                let mut pending: Vec<TrackIngestEvent> = Vec::with_capacity(args.batch_size.max(8));
                 let mut flush_tick = interval(Duration::from_millis(args.flush_interval_ms));
                 flush_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -139,10 +116,18 @@ async fn run(args: Args) -> anyhow::Result<()> {
                             for framed in framer.feed(&chunk[..n]) {
                                 match framed {
                                     Ok(message) => {
-                                        pending.push(IngestEvent {
-                                            seq: next_seq,
+                                        pending.push(TrackIngestEvent {
+                                            event_id: Uuid::new_v4(),
+                                            track_id: args.track_id.clone(),
+                                            event_id_context: EventIdContext {
+                                                client_id: args.client_id.clone(),
+                                                boot_id: boot_id.clone(),
+                                                seq: next_seq,
+                                            },
                                             captured_at_us: now_unix_micros(),
-                                            message,
+                                            message_type: message_type_from_message(&message)
+                                                .to_string(),
+                                            payload: message,
                                         });
                                         next_seq = next_seq.saturating_add(1);
 
@@ -179,7 +164,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
     }
 }
 
-fn trim_pending_if_needed(args: &Args, pending: &mut Vec<IngestEvent>) {
+fn trim_pending_if_needed(args: &Args, pending: &mut Vec<TrackIngestEvent>) {
     if pending.len() <= args.max_buffer_events {
         return;
     }
@@ -197,7 +182,7 @@ async fn flush_batch(
     http: &reqwest::Client,
     ingest_url: &str,
     args: &Args,
-    pending: &mut Vec<IngestEvent>,
+    pending: &mut Vec<TrackIngestEvent>,
 ) -> anyhow::Result<()> {
     if pending.is_empty() {
         return Ok(());
@@ -205,18 +190,16 @@ async fn flush_batch(
 
     let events = std::mem::take(pending);
     let event_count = events.len();
-    let request = IngestBatchRequest {
-        contract_version: CONTRACT_VERSION.to_string(),
-        session_id: args.session_id.clone(),
+    let request = TrackIngestBatchRequest {
+        contract_version: TRACK_INGEST_CONTRACT_VERSION_V2.to_string(),
         track_id: args.track_id.clone(),
-        client_id: args.client_id.clone(),
         events,
     };
 
     let response = http.post(ingest_url).json(&request).send().await;
     match response {
         Ok(resp) if resp.status().is_success() => {
-            let body = resp.json::<IngestBatchResponse>().await;
+            let body = resp.json::<TrackIngestBatchResponse>().await;
             match body {
                 Ok(summary) => {
                     info!(

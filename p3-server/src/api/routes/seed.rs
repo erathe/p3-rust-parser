@@ -1,4 +1,4 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::Serialize;
 
 use crate::api::error::ApiError;
@@ -24,25 +24,23 @@ pub struct SeedResult {
 }
 
 /// POST /api/seed-demo — Create demo data matching the test-server full-race scenario
-pub async fn seed_demo(
-    State(state): State<AppState>,
-) -> Result<Json<SeedResult>, ApiError> {
+pub async fn seed_demo(State(state): State<AppState>) -> Result<Json<SeedResult>, ApiError> {
     let db = &state.db;
 
     // Check if demo track already exists
-    let existing = sqlx::query_scalar::<_, String>("SELECT id FROM tracks WHERE name = 'Demo BMX Track'")
-        .fetch_optional(db)
-        .await?;
+    let existing =
+        sqlx::query_scalar::<_, String>("SELECT id FROM tracks WHERE name = 'Demo BMX Track'")
+            .fetch_optional(db)
+            .await?;
 
     if let Some(track_id) = existing {
         // Already seeded — return existing IDs
-        let event_id = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM events WHERE track_id = ? LIMIT 1",
-        )
-        .bind(&track_id)
-        .fetch_optional(db)
-        .await?
-        .unwrap_or_default();
+        let event_id =
+            sqlx::query_scalar::<_, String>("SELECT id FROM events WHERE track_id = ? LIMIT 1")
+                .bind(&track_id)
+                .fetch_optional(db)
+                .await?
+                .unwrap_or_default();
 
         let class_id = sqlx::query_scalar::<_, String>(
             "SELECT id FROM event_classes WHERE event_id = ? LIMIT 1",
@@ -108,12 +106,11 @@ pub async fn seed_demo(
     let mut rider_ids = Vec::new();
     for (transponder_id, first_name, last_name, plate_number) in &rider_data {
         // Check if rider with this transponder already exists
-        let existing = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM riders WHERE transponder_id = ?",
-        )
-        .bind(transponder_id)
-        .fetch_optional(db)
-        .await?;
+        let existing =
+            sqlx::query_scalar::<_, String>("SELECT id FROM riders WHERE transponder_id = ?")
+                .bind(transponder_id)
+                .fetch_optional(db)
+                .await?;
 
         let rider_id = if let Some(id) = existing {
             id
@@ -188,8 +185,7 @@ pub async fn seed_demo(
 
         for (rider_id, lane) in &assignment.entries {
             let entry_id = uuid::Uuid::new_v4().to_string();
-            moto_queries::create_entry(db, &entry_id, &moto_id, rider_id, *lane)
-                .await?;
+            moto_queries::create_entry(db, &entry_id, &moto_id, rider_id, *lane).await?;
         }
     }
 

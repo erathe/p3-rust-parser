@@ -237,7 +237,14 @@ mod tests {
         let (message_tx, _) = broadcast::channel(32);
         let (race_event_tx, _) = broadcast::channel::<Arc<RaceEvent>>(32);
         let engine = Arc::new(Mutex::new(RaceEngine::new(race_event_tx.clone())));
-        AppState::new(message_tx, race_event_tx, engine, db)
+        AppState::new(
+            message_tx,
+            race_event_tx,
+            engine,
+            db,
+            None,
+            "nats://127.0.0.1:4222".to_string(),
+        )
     }
 
     #[tokio::test]
@@ -297,10 +304,10 @@ mod tests {
             }],
         };
 
-        ingest_batch(State(state.clone()), Json(track_a_batch))
+        let _ = ingest_batch(State(state.clone()), Json(track_a_batch))
             .await
             .unwrap();
-        ingest_batch(State(state.clone()), Json(track_b_batch))
+        let _ = ingest_batch(State(state.clone()), Json(track_b_batch))
             .await
             .unwrap();
 
