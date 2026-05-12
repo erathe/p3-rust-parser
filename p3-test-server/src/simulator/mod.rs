@@ -72,27 +72,24 @@ impl DecoderSimulator {
         self.handle.send(message).await
     }
 
-    /// Send a rider PASSING message on a specific decoder
+    /// Send a rider PASSING message
     ///
     /// # Arguments
     /// * `transponder` - Transponder ID
     /// * `string` - 8-byte ASCII identifier (e.g., b"FL-94890")
     /// * `strength` - Signal strength (60-150 typical)
     /// * `hits` - Number of signal hits (2-50 typical)
-    /// * `decoder_id` - Optional decoder ID override (uses state default if None)
     pub async fn send_rider_passing(
         &self,
         transponder: u32,
         string: &[u8; 8],
         strength: u16,
         hits: u16,
-        decoder_id: Option<u32>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut state = self.state.lock().await;
 
         let passing_number = state.next_passing_number();
         let rtc_time = current_timestamp_micros()?;
-        let did = decoder_id.unwrap_or(state.decoder_id);
 
         let message = build_rider_passing(
             passing_number,
@@ -101,15 +98,15 @@ impl DecoderSimulator {
             rtc_time,
             strength,
             hits,
-            did,
         )?;
 
         debug!(
-            "Sending PASSING (rider): passing_number={}, transponder={}, string={}, decoder={:#010X}",
+            "Sending PASSING (rider): passing_number={}, transponder={}, string={}, strength={}, hits={}",
             passing_number,
             transponder,
             String::from_utf8_lossy(string),
-            did
+            strength,
+            hits
         );
 
         self.handle.send(message).await?;
@@ -120,23 +117,20 @@ impl DecoderSimulator {
     ///
     /// # Arguments
     /// * `transponder` - Gate beacon ID (typically 9991, 9992, or 9995)
-    /// * `decoder_id` - Optional decoder ID override (uses state default if None)
     pub async fn send_gate_passing(
         &self,
         transponder: u32,
-        decoder_id: Option<u32>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut state = self.state.lock().await;
 
         let passing_number = state.next_passing_number();
         let rtc_time = current_timestamp_micros()?;
-        let did = decoder_id.unwrap_or(state.decoder_id);
 
-        let message = build_gate_passing(passing_number, transponder, rtc_time, did);
+        let message = build_gate_passing(passing_number, transponder, rtc_time);
 
         debug!(
-            "Sending PASSING (gate): passing_number={}, transponder={}, decoder={:#010X}",
-            passing_number, transponder, did
+            "Sending PASSING (gate): passing_number={}, transponder={}",
+            passing_number, transponder
         );
 
         self.handle.send(message).await?;
@@ -144,6 +138,10 @@ impl DecoderSimulator {
     }
 
     /// Send a gate beacon PASSING message with guaranteed escape sequence
+    ///
+    /// This method sends a gate passing message using a timestamp value that
+    /// is known to produce at least one escape sequence when encoded. This is
+    /// useful for testing parser handling of escaped messages.
     ///
     /// # Arguments
     /// * `transponder` - Gate beacon ID (typically 9991, 9992, or 9995)
@@ -154,9 +152,8 @@ impl DecoderSimulator {
         let mut state = self.state.lock().await;
 
         let passing_number = state.next_passing_number();
-        let did = state.decoder_id;
 
-        let message = build_gate_passing_with_escape(passing_number, transponder, did);
+        let message = build_gate_passing_with_escape(passing_number, transponder);
 
         debug!(
             "Sending PASSING (gate with escape): passing_number={}, transponder={}",

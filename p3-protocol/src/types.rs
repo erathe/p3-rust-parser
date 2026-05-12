@@ -148,7 +148,8 @@ mod tests {
 
         // Verify header size calculation
         assert_eq!(
-            HEADER_SIZE, OFFSET_BODY,
+            HEADER_SIZE,
+            OFFSET_BODY,
             "HEADER_SIZE should equal OFFSET_BODY"
         );
     }
