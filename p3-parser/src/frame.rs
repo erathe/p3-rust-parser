@@ -1,7 +1,8 @@
 use crate::error::{ParseError, ParseResult};
 use p3_protocol::{
-    EOR, MIN_FRAME_SIZE, MessageType, OFFSET_BODY, OFFSET_CRC, OFFSET_LENGTH, OFFSET_RESERVED,
-    OFFSET_SOR, OFFSET_TYPE, OFFSET_VERSION, SOR, VERSION, unescape_data, validate_crc,
+    CrcError, EOR, MIN_FRAME_SIZE, MessageType, OFFSET_BODY, OFFSET_CRC, OFFSET_LENGTH,
+    OFFSET_RESERVED, OFFSET_SOR, OFFSET_TYPE, OFFSET_VERSION, SOR, VERSION,
+    calculate_message_crc, unescape_data,
 };
 
 /// A parsed P3 message frame
@@ -48,10 +49,7 @@ impl FrameParser {
             )));
         }
 
-        // Validate CRC (validates the complete escaped message)
-        validate_crc(data).map_err(|e| ParseError::CrcError(e))?;
-
-        // Unescape the data after CRC validation
+        // Unescape the data
         let unescaped = unescape_data(data).map_err(|e| ParseError::EscapeError(e))?;
 
         // Now work with unescaped data
@@ -67,6 +65,15 @@ impl FrameParser {
         // Extract header fields (all little-endian)
         let length = u16::from_le_bytes([unescaped[OFFSET_LENGTH], unescaped[OFFSET_LENGTH + 1]]);
         let crc = u16::from_le_bytes([unescaped[OFFSET_CRC], unescaped[OFFSET_CRC + 1]]);
+
+        // Validate CRC: the message must carry the same CRC we calculate over it
+        let calculated_crc = calculate_message_crc(data).map_err(|e| ParseError::CrcError(e))?;
+        if crc != calculated_crc {
+            return Err(ParseError::CrcError(CrcError::ValidationFailed {
+                expected: calculated_crc,
+                actual: crc,
+            }));
+        }
         let reserved =
             u16::from_le_bytes([unescaped[OFFSET_RESERVED], unescaped[OFFSET_RESERVED + 1]]);
         let message_type_raw =

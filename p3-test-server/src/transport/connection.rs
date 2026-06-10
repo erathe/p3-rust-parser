@@ -1,3 +1,4 @@
+use crate::transport::ClientRegistry;
 use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -8,6 +9,8 @@ pub struct Connection {
     stream: TcpStream,
     rx: mpsc::Receiver<Bytes>,
     peer_addr: std::net::SocketAddr,
+    client_id: usize,
+    registry: ClientRegistry,
 }
 
 impl Connection {
@@ -15,11 +18,15 @@ impl Connection {
         stream: TcpStream,
         rx: mpsc::Receiver<Bytes>,
         peer_addr: std::net::SocketAddr,
+        client_id: usize,
+        registry: ClientRegistry,
     ) -> Self {
         Self {
             stream,
             rx,
             peer_addr,
+            client_id,
+            registry,
         }
     }
 
@@ -99,6 +106,7 @@ impl Connection {
         }
 
         self.stream.flush().await?;
+        self.registry.record_send(self.client_id, message.len());
         Ok(())
     }
 }

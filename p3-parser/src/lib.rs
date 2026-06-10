@@ -29,11 +29,13 @@
 pub mod error;
 pub mod frame;
 pub mod messages;
+pub mod stream;
 pub mod tlv;
 
 pub use error::*;
 pub use frame::*;
 pub use messages::*;
+pub use stream::*;
 pub use tlv::*;
 
 use p3_protocol::MessageType;

@@ -2,7 +2,8 @@ mod connection;
 
 use bytes::Bytes;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, error, info, warn};
@@ -10,6 +11,53 @@ use tracing::{debug, error, info, warn};
 use connection::Connection;
 
 type ClientId = usize;
+
+/// Per-client connection statistics, readable while the server runs
+#[derive(Debug, Clone)]
+pub struct ClientInfo {
+    pub id: usize,
+    pub addr: SocketAddr,
+    pub bytes_sent: u64,
+    pub messages_sent: u64,
+}
+
+/// Shared registry of connected clients and their send counters
+#[derive(Clone, Default)]
+pub struct ClientRegistry {
+    inner: Arc<StdMutex<HashMap<ClientId, ClientInfo>>>,
+}
+
+impl ClientRegistry {
+    fn register(&self, id: ClientId, addr: SocketAddr) {
+        self.inner.lock().unwrap().insert(
+            id,
+            ClientInfo {
+                id,
+                addr,
+                bytes_sent: 0,
+                messages_sent: 0,
+            },
+        );
+    }
+
+    fn unregister(&self, id: ClientId) {
+        self.inner.lock().unwrap().remove(&id);
+    }
+
+    pub(crate) fn record_send(&self, id: ClientId, bytes: usize) {
+        if let Some(info) = self.inner.lock().unwrap().get_mut(&id) {
+            info.bytes_sent += bytes as u64;
+            info.messages_sent += 1;
+        }
+    }
+
+    /// Current clients, sorted by connection order
+    pub fn snapshot(&self) -> Vec<ClientInfo> {
+        let mut clients: Vec<_> = self.inner.lock().unwrap().values().cloned().collect();
+        clients.sort_by_key(|c| c.id);
+        clients
+    }
+}
 
 #[derive(Clone)]
 pub struct TransportHandle {
@@ -38,6 +86,10 @@ pub struct TcpTransport {
     broadcast_rx: mpsc::Receiver<BroadcastMessage>,
     max_clients: usize,
     chunk_size: Option<usize>,
+    /// Message sent to each client immediately on connect (real decoders
+    /// send a VERSION message here)
+    greeting: Option<Bytes>,
+    registry: ClientRegistry,
     next_client_id: ClientId,
     clients: HashMap<ClientId, mpsc::Sender<Bytes>>,
 }
@@ -49,14 +101,17 @@ impl TcpTransport {
     /// * `port` - Port to listen on (typically 5403 for P3 protocol)
     /// * `max_clients` - Maximum number of simultaneous client connections
     /// * `chunk_size` - Optional chunk size for fragmentation testing (None = send complete messages)
+    /// * `greeting` - Optional message sent to each client on connect (VERSION)
     ///
     /// # Returns
-    /// A tuple of (TcpTransport, TransportHandle) where the handle can be used to send messages
+    /// (TcpTransport, TransportHandle, ClientRegistry): the handle sends
+    /// messages, the registry exposes connected-client stats
     pub async fn new(
         port: u16,
         max_clients: usize,
         chunk_size: Option<usize>,
-    ) -> Result<(Self, TransportHandle), std::io::Error> {
+        greeting: Option<Bytes>,
+    ) -> Result<(Self, TransportHandle, ClientRegistry), std::io::Error> {
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         let addr = listener.local_addr()?;
 
@@ -68,6 +123,7 @@ impl TcpTransport {
         // Channel for broadcasting messages to all clients
         // Buffer size of 32 allows simulator to queue messages without blocking
         let (broadcast_tx, broadcast_rx) = mpsc::channel(32);
+        let registry = ClientRegistry::default();
 
         let transport = Self {
             listener,
@@ -75,13 +131,15 @@ impl TcpTransport {
             broadcast_rx,
             max_clients,
             chunk_size,
+            greeting,
+            registry: registry.clone(),
             next_client_id: 0,
             clients: HashMap::new(),
         };
 
         let handle = TransportHandle { tx: broadcast_tx };
 
-        Ok((transport, handle))
+        Ok((transport, handle, registry))
     }
 
     pub async fn run(mut self) -> Result<(), std::io::Error> {
@@ -113,21 +171,29 @@ impl TcpTransport {
                             // Create a channel for this client
                             let (client_tx, client_rx) = mpsc::channel(32);
 
+                            // Greet the new client (fresh channel, cannot be full)
+                            if let Some(greeting) = &self.greeting {
+                                let _ = client_tx.try_send(greeting.clone());
+                            }
+
                             // Register the client
                             self.clients.insert(client_id, client_tx);
+                            self.registry.register(client_id, addr);
                             info!("Client {} registered ({}), total clients: {}", client_id, addr, self.clients.len());
 
                             // Spawn connection handler
                             let chunk_size = self.chunk_size;
                             let broadcast_tx = self.broadcast_tx.clone();
+                            let registry = self.registry.clone();
 
                             tokio::spawn(async move {
-                                let connection = Connection::new(stream, client_rx, addr);
+                                let connection = Connection::new(stream, client_rx, addr, client_id, registry.clone());
                                 if let Err(e) = connection.run(chunk_size).await {
                                     error!("Connection error for {}: {}", addr, e);
                                 }
 
                                 // Unregister client when connection closes
+                                registry.unregister(client_id);
                                 let _ = broadcast_tx.send(BroadcastMessage::UnregisterClient(client_id)).await;
                                 drop(permit); // Release connection slot
                             });
@@ -154,6 +220,7 @@ impl TcpTransport {
                             // Remove failed clients
                             for client_id in failed_clients {
                                 self.clients.remove(&client_id);
+                                self.registry.unregister(client_id);
                                 warn!("Removed disconnected client {}", client_id);
                             }
 

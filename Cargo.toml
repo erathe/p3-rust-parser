@@ -21,3 +21,8 @@ hex = "0.4"
 proptest = "1.0"
 quickcheck = "1.0"
 quickcheck_macros = "1.0"
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rand = "0.8"
+tempfile = "3"

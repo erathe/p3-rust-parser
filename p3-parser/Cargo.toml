@@ -18,6 +18,7 @@ clap = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
+p3-test-server = { path = "../p3-test-server" }
 
 [[bin]]
 name = "p3-parser"

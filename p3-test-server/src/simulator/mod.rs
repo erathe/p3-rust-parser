@@ -11,7 +11,7 @@ use crate::generator::builder::{
 use crate::transport::{SendError, TransportHandle};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{Duration, interval};
+use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info};
 
 /// Decoder simulator that generates and sends P3 protocol messages
@@ -36,13 +36,31 @@ impl DecoderSimulator {
         }
     }
 
+    /// Run the STATUS heartbeat loop.
+    ///
+    /// Interval and pause state are read from `DecoderState` each iteration,
+    /// so they can be changed at runtime. An interval change applies after
+    /// the current tick.
     pub async fn start_status_loop(self) {
-        let mut timer = interval(Duration::from_secs(5));
-
-        info!("Starting STATUS message loop (5 second interval)");
+        info!("Starting STATUS message loop");
 
         loop {
-            timer.tick().await;
+            let (interval_s, paused) = {
+                let state = self.state.lock().await;
+                (state.status_interval_s, state.status_paused)
+            };
+
+            if paused {
+                // Poll for resume without sending
+                sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+
+            sleep(Duration::from_secs(interval_s.max(1))).await;
+
+            if self.state.lock().await.status_paused {
+                continue;
+            }
 
             if let Err(e) = self.send_status().await {
                 error!("Failed to send STATUS message: {}", e);

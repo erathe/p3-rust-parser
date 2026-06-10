@@ -18,9 +18,14 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+rusqlite = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
 proptest = { workspace = true }
 quickcheck = { workspace = true }
 quickcheck_macros = { workspace = true }
+tempfile = { workspace = true }

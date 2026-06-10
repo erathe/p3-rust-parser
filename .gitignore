@@ -15,6 +15,9 @@ Cargo.lock
 # Debug files
 *.dSYM/
 
+# Test server runtime config (SQLite)
+test-server.db
+
 # IDE
 .vscode/
 .idea/

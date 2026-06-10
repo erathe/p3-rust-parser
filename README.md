@@ -49,10 +49,27 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-### Run test server (when implemented)
+### Run the test server
+
+Interactive race-control TUI (roster and settings persist in `test-server.db`):
+
+```bash
+cargo run --bin test-server -- tui
+```
+
+Keys: `g` gate drop, `1`-`8` fire rider, `r` auto-race, `s` STATUS now,
+`p` pause heartbeat, `c`/`x`/`t` fault injection, `e` edit settings, `q` quit.
+
+Headless scripted scenario (for CI):
 
 ```bash
 cargo run --bin test-server -- --scenario bmx-race --port 5403
+```
+
+### Run the parser client
+
+```bash
+cargo run --bin p3-parser -- --port 5403 --pretty
 ```
 
 ## Documentation

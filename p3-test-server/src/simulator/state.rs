@@ -20,6 +20,12 @@ pub struct DecoderState {
 
     /// Number of GPS satellites in use
     pub gps_satellites: u8,
+
+    /// Seconds between STATUS heartbeats
+    pub status_interval_s: u64,
+
+    /// When true, the STATUS loop skips sending (decoder appears dead)
+    pub status_paused: bool,
 }
 
 impl DecoderState {
@@ -32,6 +38,8 @@ impl DecoderState {
             temperature_celsius_x10: 16,
             gps_has_fix: true,
             gps_satellites: 0,
+            status_interval_s: 5,
+            status_paused: false,
         }
     }
 
